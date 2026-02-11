@@ -1,0 +1,45 @@
+name: contoso-meals-sre
+metadata:
+  template: contoso-meals-sre
+infra:
+  provider: bicep
+  path: infra
+  module: main
+services:
+  order-api:
+    project: ./app/order-api
+    host: aks
+    language: csharp
+    docker:
+      path: ./Dockerfile
+    k8s:
+      namespace: production
+      deploymentPath: ./manifests
+  payment-service:
+    project: ./app/payment-service
+    host: aks
+    language: csharp
+    docker:
+      path: ./Dockerfile
+    k8s:
+      namespace: production
+      deploymentPath: ./manifests
+  menu-api:
+    project: ./app/menu-api
+    host: containerapp
+    language: csharp
+    docker:
+      path: ./Dockerfile
+  web-ui:
+    project: ./app/web-ui
+    host: containerapp
+    language: js
+    docker:
+      path: ./Dockerfile
+hooks:
+  postprovision:
+    posix:
+      shell: sh
+      run: scripts/post-provision.sh
+      interactive: true
+      continueOnError: false

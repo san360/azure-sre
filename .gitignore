@@ -1,0 +1,53 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# .NET
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Node.js
+node_modules/
+dist/
+dist-ssr/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+*.sw?
+*.swp
+
+# Azure Developer CLI
+.azure/
+
+# Environment / secrets
+.env
+.env.*
+*.local
+secrets.yaml
+
+# Compiled ARM templates (regenerated from Bicep)
+infra/main.json
+
+# Python
+__pycache__/
+*.pyc
+
+# Test / load-test results
+*.jtl
+*.csv.results

@@ -1,0 +1,673 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Contoso Meals - Observability Dashboard\nEnd-to-end monitoring for AKS services (order-api, payment-service), Container Apps (menu-api, jira-sm, mcp-atlassian), PostgreSQL, and Cosmos DB."
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "a0b1c2d3-time-range-param",
+            "version": "KqlParameterItem/1.0",
+            "name": "timeRange",
+            "label": "Time Range",
+            "type": 4,
+            "isRequired": true,
+            "typeSettings": {
+              "selectableValues": [
+                { "durationMs": 900000 },
+                { "durationMs": 1800000 },
+                { "durationMs": 3600000 },
+                { "durationMs": 14400000 },
+                { "durationMs": 43200000 },
+                { "durationMs": 86400000 },
+                { "durationMs": 259200000 },
+                { "durationMs": 604800000 }
+              ],
+              "allowCustom": true
+            },
+            "value": {
+              "durationMs": 14400000
+            }
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "parameters-timeRange"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {
+            "id": "tab-overview",
+            "cellValue": "overview",
+            "linkTarget": "parameter",
+            "linkLabel": "Overview",
+            "subTarget": "selectedTab",
+            "style": "link",
+            "preText": ""
+          },
+          {
+            "id": "tab-app-performance",
+            "cellValue": "appPerformance",
+            "linkTarget": "parameter",
+            "linkLabel": "Application Performance",
+            "subTarget": "selectedTab",
+            "style": "link"
+          },
+          {
+            "id": "tab-infrastructure",
+            "cellValue": "infrastructure",
+            "linkTarget": "parameter",
+            "linkLabel": "Infrastructure",
+            "subTarget": "selectedTab",
+            "style": "link"
+          },
+          {
+            "id": "tab-jira-deps",
+            "cellValue": "jiraDeps",
+            "linkTarget": "parameter",
+            "linkLabel": "Jira & Dependencies",
+            "subTarget": "selectedTab",
+            "style": "link"
+          }
+        ]
+      },
+      "name": "navigation-tabs"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Resource Health Overview\nCurrent status of core infrastructure components."
+            },
+            "name": "overview-heading"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let aks_health = AzureMetrics\n| where TimeGenerated {timeRange}\n| where ResourceProvider == \"MICROSOFT.CONTAINERSERVICE\"\n| where MetricName == \"kube_node_status_condition\"\n| summarize LastValue = avg(Average) by ResourceId\n| extend Resource = \"AKS Cluster\", Status = iff(LastValue >= 1, \"Healthy\", \"Degraded\");\nlet postgres_health = AzureMetrics\n| where TimeGenerated {timeRange}\n| where ResourceProvider == \"MICROSOFT.DBFORPOSTGRESQL\"\n| where MetricName == \"is_db_alive\"\n| summarize LastValue = max(Maximum) by ResourceId\n| extend Resource = \"PostgreSQL\", Status = iff(LastValue >= 1, \"Healthy\", \"Unavailable\");\nlet cosmos_health = AzureMetrics\n| where TimeGenerated {timeRange}\n| where ResourceProvider == \"MICROSOFT.DOCUMENTDB\"\n| where MetricName == \"ServiceAvailability\"\n| summarize LastValue = avg(Average) by ResourceId\n| extend Resource = \"Cosmos DB\", Status = iff(LastValue >= 99.9, \"Healthy\", \"Degraded\");\nlet containerapp_health = AppRequests\n| where TimeGenerated {timeRange}\n| where AppRoleName in (\"menu-api\", \"jira-sm\", \"mcp-atlassian\")\n| summarize TotalRequests = count(), FailedRequests = countif(ResultCode startswith \"5\") by AppRoleName\n| extend Resource = strcat(\"Container App: \", AppRoleName), Status = iff(FailedRequests * 100.0 / TotalRequests < 5, \"Healthy\", \"Degraded\")\n| project Resource, Status;\naks_health\n| project Resource, Status\n| union postgres_health | project Resource, Status\n| union cosmos_health | project Resource, Status\n| union containerapp_health",
+              "size": 3,
+              "title": "Resource Health Status",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Resource",
+                  "formatter": 1
+                },
+                "subtitleContent": {
+                  "columnMatch": "Status",
+                  "formatter": 18,
+                  "formatOptions": {
+                    "thresholdsOptions": "colors",
+                    "thresholdsGrid": [
+                      { "operator": "==", "thresholdValue": "Healthy", "representation": "green", "text": "{0}" },
+                      { "operator": "==", "thresholdValue": "Degraded", "representation": "orange", "text": "{0}" },
+                      { "operator": "==", "thresholdValue": "Unavailable", "representation": "red", "text": "{0}" },
+                      { "operator": "Default", "representation": "gray", "text": "{0}" }
+                    ]
+                  }
+                },
+                "showBorder": true
+              }
+            },
+            "name": "resource-health-tiles"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppRequests\n| where TimeGenerated {timeRange}\n| summarize RequestCount = count() by bin(TimeGenerated, 5m)\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "HTTP Request Volume (Total Requests Over Time)",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "yAxis": ["RequestCount"],
+                "seriesLabelSettings": [
+                  { "seriesName": "RequestCount", "label": "Requests", "color": "blue" }
+                ]
+              }
+            },
+            "customWidth": "60",
+            "name": "http-request-volume"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppRequests\n| where TimeGenerated {timeRange}\n| extend Outcome = case(\n    toint(ResultCode) >= 200 and toint(ResultCode) < 400, \"Success (2xx/3xx)\",\n    toint(ResultCode) >= 400 and toint(ResultCode) < 500, \"Client Error (4xx)\",\n    toint(ResultCode) >= 500, \"Server Error (5xx)\",\n    \"Unknown\"\n  )\n| summarize Count = count() by Outcome",
+              "size": 0,
+              "title": "Overall Success / Failure Rate",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "piechart",
+              "chartSettings": {
+                "seriesLabelSettings": [
+                  { "seriesName": "Success (2xx/3xx)", "color": "green" },
+                  { "seriesName": "Client Error (4xx)", "color": "orange" },
+                  { "seriesName": "Server Error (5xx)", "color": "redBright" },
+                  { "seriesName": "Unknown", "color": "gray" }
+                ]
+              }
+            },
+            "customWidth": "40",
+            "name": "success-failure-pie"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "overview"
+      },
+      "name": "group-overview"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Application Performance\nDetailed HTTP metrics for order-api, payment-service, and menu-api."
+            },
+            "name": "app-perf-heading"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppRequests\n| where TimeGenerated {timeRange}\n| where AppRoleName in (\"order-api\", \"payment-service\", \"menu-api\")\n| summarize RPS = count() / 60.0 by bin(TimeGenerated, 1m), AppRoleName\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "HTTP Requests Per Second by Service",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "yAxis": ["RPS"],
+                "seriesLabelSettings": [
+                  { "seriesName": "order-api", "color": "blue" },
+                  { "seriesName": "payment-service", "color": "purple" },
+                  { "seriesName": "menu-api", "color": "turquoise" }
+                ]
+              }
+            },
+            "name": "rps-by-service"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppRequests\n| where TimeGenerated {timeRange}\n| where AppRoleName in (\"order-api\", \"payment-service\", \"menu-api\")\n| summarize\n    P50 = percentile(DurationMs, 50),\n    P95 = percentile(DurationMs, 95),\n    P99 = percentile(DurationMs, 99)\n  by bin(TimeGenerated, 5m), AppRoleName\n| order by TimeGenerated asc\n| project TimeGenerated,\n    strcat(AppRoleName, \" P50\") , P50,\n    strcat(AppRoleName, \" P95\") , P95,\n    strcat(AppRoleName, \" P99\") , P99\n| evaluate pivot(Column1, take_any(P50, P95, P99))",
+              "size": 0,
+              "title": "Response Time Percentiles by Service (ms)",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart"
+            },
+            "name": "response-time-percentiles-pivot"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppRequests\n| where TimeGenerated {timeRange}\n| where AppRoleName in (\"order-api\", \"payment-service\", \"menu-api\")\n| extend P50 = DurationMs\n| summarize\n    P50 = percentile(DurationMs, 50),\n    P95 = percentile(DurationMs, 95),\n    P99 = percentile(DurationMs, 99)\n  by bin(TimeGenerated, 5m), AppRoleName\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "Response Time P50 / P95 / P99 by Service (ms)",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "yAxis": ["P50", "P95", "P99"]
+              }
+            },
+            "name": "response-time-percentiles"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppRequests\n| where TimeGenerated {timeRange}\n| where AppRoleName in (\"order-api\", \"payment-service\", \"menu-api\")\n| extend StatusBucket = case(\n    toint(ResultCode) >= 200 and toint(ResultCode) < 300, \"2xx\",\n    toint(ResultCode) >= 400 and toint(ResultCode) < 500, \"4xx\",\n    toint(ResultCode) >= 500, \"5xx\",\n    \"Other\"\n  )\n| summarize Count = count() by bin(TimeGenerated, 5m), StatusBucket\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "HTTP Status Code Distribution Over Time",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart",
+              "chartSettings": {
+                "xAxis": "TimeGenerated",
+                "yAxis": ["Count"],
+                "group": "StatusBucket",
+                "stackedSettings": {
+                  "enabled": true
+                },
+                "seriesLabelSettings": [
+                  { "seriesName": "2xx", "color": "green" },
+                  { "seriesName": "4xx", "color": "orange" },
+                  { "seriesName": "5xx", "color": "redBright" },
+                  { "seriesName": "Other", "color": "gray" }
+                ]
+              }
+            },
+            "name": "status-code-distribution"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppRequests\n| where TimeGenerated {timeRange}\n| where toint(ResultCode) >= 400\n| where AppRoleName in (\"order-api\", \"payment-service\", \"menu-api\")\n| project\n    TimeGenerated,\n    Service = AppRoleName,\n    Operation = Name,\n    StatusCode = ResultCode,\n    DurationMs = round(DurationMs, 1),\n    Url = Url\n| order by TimeGenerated desc\n| take 100",
+              "size": 0,
+              "title": "Failed Request Details (4xx and 5xx)",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "StatusCode",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        { "operator": "startsWith", "thresholdValue": "5", "representation": "redBright", "text": "{0}" },
+                        { "operator": "startsWith", "thresholdValue": "4", "representation": "orange", "text": "{0}" },
+                        { "operator": "Default", "representation": "gray", "text": "{0}" }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "DurationMs",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "min": 0,
+                      "max": 5000,
+                      "palette": "greenRed"
+                    }
+                  }
+                ],
+                "sortBy": [
+                  { "itemKey": "TimeGenerated", "sortOrder": 2 }
+                ]
+              }
+            },
+            "name": "failed-request-details"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "appPerformance"
+      },
+      "name": "group-app-performance"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Infrastructure\nAKS cluster metrics, database health, and resource utilization."
+            },
+            "name": "infra-heading"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "InsightsMetrics\n| where TimeGenerated {timeRange}\n| where Namespace == \"container.azm.ms/cpuUtilization\" or Name == \"cpuUsageNanoCores\"\n| extend PodName = tostring(parse_json(Tags)[\"pod\"])\n| where isnotempty(PodName)\n| summarize AvgCPU = avg(Val) by bin(TimeGenerated, 5m), PodName\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "AKS CPU Usage by Pod",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart"
+            },
+            "customWidth": "50",
+            "name": "aks-cpu-by-pod"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "InsightsMetrics\n| where TimeGenerated {timeRange}\n| where Namespace == \"container.azm.ms/memoryUtilization\" or Name == \"memoryWorkingSetBytes\"\n| extend PodName = tostring(parse_json(Tags)[\"pod\"])\n| where isnotempty(PodName)\n| summarize AvgMemoryMB = avg(Val) / 1048576 by bin(TimeGenerated, 5m), PodName\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "AKS Memory Usage by Pod (MB)",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart"
+            },
+            "customWidth": "50",
+            "name": "aks-memory-by-pod"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let podRestarts = KubePodInventory\n| where TimeGenerated {timeRange}\n| where ClusterName contains \"contoso-meals\"\n| distinct TimeGenerated, Name, ContainerRestartCount\n| summarize MaxRestarts = max(ContainerRestartCount) by bin(TimeGenerated, 15m), Name\n| order by TimeGenerated asc;\npodRestarts\n| project TimeGenerated, PodName = Name, RestartCount = MaxRestarts",
+              "size": 0,
+              "title": "Pod Restart Count Over Time",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "yAxis": ["RestartCount"]
+              }
+            },
+            "name": "pod-restart-count"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AzureMetrics\n| where TimeGenerated {timeRange}\n| where ResourceProvider == \"MICROSOFT.DBFORPOSTGRESQL\"\n| where MetricName in (\"active_connections\", \"connections_failed\")\n| summarize Value = avg(Average) by bin(TimeGenerated, 5m), MetricName\n| extend Series = case(\n    MetricName == \"active_connections\", \"Active Connections\",\n    MetricName == \"connections_failed\", \"Failed Connections\",\n    MetricName\n  )\n| project TimeGenerated, Series, Value\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "PostgreSQL Active Connections & Failed Connections",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "seriesLabelSettings": [
+                  { "seriesName": "Active Connections", "color": "blue" },
+                  { "seriesName": "Failed Connections", "color": "redBright" }
+                ]
+              }
+            },
+            "customWidth": "50",
+            "name": "postgres-connections"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AzureMetrics\n| where TimeGenerated {timeRange}\n| where ResourceProvider == \"MICROSOFT.DOCUMENTDB\"\n| where MetricName == \"TotalRequestUnits\"\n| summarize TotalRU = sum(Total) by bin(TimeGenerated, 5m)\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "Cosmos DB Request Unit (RU) Consumption",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "yAxis": ["TotalRU"],
+                "seriesLabelSettings": [
+                  { "seriesName": "TotalRU", "color": "turquoise" }
+                ]
+              }
+            },
+            "customWidth": "50",
+            "name": "cosmos-ru-consumption"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AzureMetrics\n| where TimeGenerated {timeRange}\n| where ResourceProvider == \"MICROSOFT.DOCUMENTDB\"\n| where MetricName == \"TotalRequests\"\n| extend StatusCode = tostring(parse_json(DimensionList)[0][\"value\"])\n| where StatusCode == \"429\"\n| summarize ThrottledRequests = sum(Count) by bin(TimeGenerated, 5m)\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "Cosmos DB 429 Throttled Requests Over Time",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart",
+              "chartSettings": {
+                "yAxis": ["ThrottledRequests"],
+                "seriesLabelSettings": [
+                  { "seriesName": "ThrottledRequests", "color": "redBright", "label": "429 Throttled" }
+                ]
+              }
+            },
+            "name": "cosmos-throttle-429"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "infrastructure"
+      },
+      "name": "group-infrastructure"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": 0,
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Jira & External Dependencies\nContainer App health for Jira Service Management and MCP Atlassian, plus downstream dependency monitoring."
+            },
+            "name": "jira-deps-heading"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "ContainerAppConsoleLogs_CL\n| where TimeGenerated {timeRange}\n| where ContainerAppName_s in (\"jira-sm\", \"mcp-atlassian\")\n| summarize\n    LogCount = count(),\n    ErrorCount = countif(Log_s contains \"ERROR\" or Log_s contains \"Exception\"),\n    LastSeen = max(TimeGenerated)\n  by ContainerAppName_s\n| extend\n    Status = iff(ErrorCount == 0, \"Healthy\", iff(ErrorCount * 100.0 / LogCount < 5, \"Warning\", \"Error\")),\n    ErrorRate = round(ErrorCount * 100.0 / LogCount, 2)\n| project\n    ContainerApp = ContainerAppName_s,\n    Status,\n    TotalLogs = LogCount,\n    Errors = ErrorCount,\n    ErrorRatePercent = ErrorRate,\n    LastActivity = LastSeen",
+              "size": 0,
+              "title": "Container App Status: jira-sm & mcp-atlassian",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "Status",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        { "operator": "==", "thresholdValue": "Healthy", "representation": "green", "text": "{0}" },
+                        { "operator": "==", "thresholdValue": "Warning", "representation": "orange", "text": "{0}" },
+                        { "operator": "==", "thresholdValue": "Error", "representation": "redBright", "text": "{0}" },
+                        { "operator": "Default", "representation": "gray", "text": "{0}" }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "ErrorRatePercent",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "min": 0,
+                      "max": 10,
+                      "palette": "greenRed"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "container-app-status"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppDependencies\n| where TimeGenerated {timeRange}\n| summarize\n    TotalCalls = count(),\n    SuccessfulCalls = countif(Success == true),\n    FailedCalls = countif(Success == false)\n  by bin(TimeGenerated, 5m), Target\n| extend SuccessRate = round(SuccessfulCalls * 100.0 / TotalCalls, 2)\n| project TimeGenerated, Target, SuccessRate\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "Dependency Call Success Rate by Target (%)",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "ySettings": {
+                  "min": 0,
+                  "max": 100,
+                  "numberFormatSettings": {
+                    "unit": 1,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 1
+                    }
+                  }
+                }
+              }
+            },
+            "customWidth": "50",
+            "name": "dependency-success-rate"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppDependencies\n| where TimeGenerated {timeRange}\n| summarize\n    P50_ms = round(percentile(DurationMs, 50), 1),\n    P95_ms = round(percentile(DurationMs, 95), 1),\n    P99_ms = round(percentile(DurationMs, 99), 1)\n  by bin(TimeGenerated, 5m), Target\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "External Dependency Latency by Target (ms)",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart",
+              "chartSettings": {
+                "yAxis": ["P50_ms", "P95_ms", "P99_ms"]
+              }
+            },
+            "customWidth": "50",
+            "name": "dependency-latency"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "AppDependencies\n| where TimeGenerated {timeRange}\n| where Success == false\n| project\n    TimeGenerated,\n    Source = AppRoleName,\n    DependencyType = Type,\n    Target,\n    ResultCode,\n    DurationMs = round(DurationMs, 1)\n| order by TimeGenerated desc\n| take 50",
+              "size": 0,
+              "title": "Failed Dependency Calls (Recent)",
+              "timeContext": {
+                "durationMs": 0
+              },
+              "timeContextFromParameter": "timeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table",
+              "gridSettings": {
+                "formatters": [
+                  {
+                    "columnMatch": "ResultCode",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        { "operator": "startsWith", "thresholdValue": "5", "representation": "redBright", "text": "{0}" },
+                        { "operator": "startsWith", "thresholdValue": "4", "representation": "orange", "text": "{0}" },
+                        { "operator": "Default", "representation": "gray", "text": "{0}" }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "DurationMs",
+                    "formatter": 8,
+                    "formatOptions": {
+                      "min": 0,
+                      "max": 10000,
+                      "palette": "greenRed"
+                    }
+                  }
+                ],
+                "sortBy": [
+                  { "itemKey": "TimeGenerated", "sortOrder": 2 }
+                ]
+              }
+            },
+            "name": "failed-dependency-calls"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "jiraDeps"
+      },
+      "name": "group-jira-deps"
+    }
+  ],
+  "fallbackResourceIds": [],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus2"
+    },
+    "prefix": {
+      "value": "contoso-meals"
+    },
+    "enableChaos": {
+      "value": true
+    },
+    "enableLoadTesting": {
+      "value": true
+    },
+    "enableJira": {
+      "value": true
+    },
+    "postgresLocation": {
+      "value": "swedencentral"
+    }
+  }
+}
