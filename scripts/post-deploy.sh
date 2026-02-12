@@ -27,8 +27,9 @@ echo "Resource Group: $RESOURCE_GROUP"
 echo "AKS Cluster:    $AKS_CLUSTER_NAME"
 echo ""
 
-# ─── Step 1: Deploy K8s manifests & wait for LoadBalancer IPs ───────
-echo "[1/4] Deploying AKS manifests (namespace, order-api, payment-service)..."
+# ─── Step 1: Ensure namespace exists & wait for LoadBalancer IPs ────
+echo "[1/4] Waiting for AKS LoadBalancer external IPs..."
+echo "  (Manifests are deployed by 'azd deploy' — no separate kubectl apply needed)"
 
 # Get AKS credentials if not already configured
 az aks get-credentials \
@@ -36,11 +37,10 @@ az aks get-credentials \
   --name "$AKS_CLUSTER_NAME" \
   --overwrite-existing --only-show-errors 2>/dev/null || true
 
-kubectl apply -f "$PROJECT_ROOT/manifests/namespace.yaml"
-kubectl apply -f "$PROJECT_ROOT/manifests/order-api.yaml"
-kubectl apply -f "$PROJECT_ROOT/manifests/payment-service.yaml"
+# Ensure namespace exists (azd deploy should create it, but just in case)
+kubectl apply -f "$PROJECT_ROOT/manifests/namespace.yaml" 2>/dev/null || true
 
-echo "  Manifests applied. Waiting for LoadBalancer external IPs..."
+echo "  Waiting for LoadBalancer external IPs..."
 
 ORDER_API_IP=""
 PAYMENT_SERVICE_IP=""
