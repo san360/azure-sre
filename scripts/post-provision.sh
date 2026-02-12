@@ -39,15 +39,49 @@ run_kubectl() {
 }
 
 # Step 1: Attach ACR to AKS (allows AKS to pull images without imagePullSecrets)
-echo "[1/5] Attaching ACR to AKS..."
+echo "[1/6] Attaching ACR to AKS..."
 az aks update \
   --resource-group "$RESOURCE_GROUP" \
   --name "$AKS_CLUSTER_NAME" \
   --attach-acr "$ACR_NAME" \
   --only-show-errors 2>/dev/null || echo "  WARNING: ACR attach failed (may require Owner role or already attached)"
 
+# Step 1b: Configure ACR authentication for Container Apps
+# Container Apps need registry credentials to pull images pushed by azd deploy
+echo "[1b/6] Configuring ACR registry on Container Apps..."
+ACR_SERVER="${ACR_NAME}.azurecr.io"
+
+# Grant AcrPull role to each Container App's system-assigned managed identity
+for APP_NAME in menu-api web-ui; do
+  APP_MI_ID=$(az containerapp show \
+    --name "$APP_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    --query "identity.principalId" -o tsv 2>/dev/null || echo "")
+  if [ -n "$APP_MI_ID" ]; then
+    ACR_ID=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv 2>/dev/null || echo "")
+    if [ -n "$ACR_ID" ]; then
+      az role assignment create \
+        --assignee-object-id "$APP_MI_ID" \
+        --assignee-principal-type ServicePrincipal \
+        --role AcrPull \
+        --scope "$ACR_ID" \
+        --only-show-errors 2>/dev/null || true
+    fi
+    # Register ACR on the Container App using managed identity
+    az containerapp registry set \
+      --name "$APP_NAME" \
+      --resource-group "$RESOURCE_GROUP" \
+      --server "$ACR_SERVER" \
+      --identity system \
+      --only-show-errors 2>/dev/null || echo "  WARNING: Failed to set ACR registry on $APP_NAME"
+    echo "  $APP_NAME → ACR registry configured (managed identity)"
+  else
+    echo "  WARNING: $APP_NAME has no system-assigned identity"
+  fi
+done
+
 # Step 2: Create namespace and secrets via command invoke
-echo "[2/5] Creating Kubernetes namespace and secrets..."
+echo "[2/6] Creating Kubernetes namespace and secrets..."
 
 # Create production namespace
 run_kubectl "kubectl create namespace production --dry-run=client -o yaml | kubectl apply -f -" || echo "  WARNING: namespace creation had issues"
@@ -73,7 +107,7 @@ if [ -z "$APPINSIGHTS_CS" ]; then
   APPINSIGHTS_CS="InstrumentationKey=00000000-0000-0000-0000-000000000000"
 fi
 
-echo "[3/5] Creating Kubernetes secrets..."
+echo "[3/6] Creating Kubernetes secrets..."
 # Create/update secrets via command invoke
 run_kubectl "kubectl create secret generic contoso-meals-secrets \
   --namespace production \
@@ -82,7 +116,7 @@ run_kubectl "kubectl create secret generic contoso-meals-secrets \
   --dry-run=client -o yaml | kubectl apply -f -" || echo "  WARNING: secret creation had issues"
 
 # Step 4: Inject connection strings into menu-api Container App
-echo "[4/5] Configuring menu-api Container App with connection strings..."
+echo "[4/6] Configuring menu-api Container App with connection strings..."
 COSMOS_CS=$(az cosmosdb keys list \
   --name "$COSMOS_DB_NAME" \
   --resource-group "$RESOURCE_GROUP" \
@@ -103,7 +137,7 @@ else
 fi
 
 # Step 4b: Configure web-ui Container App with backend API URLs
-echo "[4b/5] Configuring web-ui Container App with backend API URLs..."
+echo "[4b/6] Configuring web-ui Container App with backend API URLs..."
 MENU_API_FQDN=$(az containerapp show \
   --name menu-api \
   --resource-group "$RESOURCE_GROUP" \
@@ -144,7 +178,7 @@ else
 fi
 
 # Step 5: Store connection strings in azd env for reference
-echo "[5/5] Storing connection strings in azd environment..."
+echo "[5/6] Storing connection strings in azd environment..."
 azd env set APPLICATIONINSIGHTS_CONNECTION_STRING "$APPINSIGHTS_CS" 2>/dev/null || true
 azd env set COSMOS_CONNECTION_STRING "${COSMOS_CS:-}" 2>/dev/null || true
 

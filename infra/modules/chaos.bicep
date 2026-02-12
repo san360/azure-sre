@@ -7,11 +7,26 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2024-09-01' exis
   name: aksClusterName
 }
 
+// Install Chaos Mesh on AKS via Kubernetes extension
+// This deploys Chaos Mesh into the 'chaos-testing' namespace on the cluster
+resource chaosMeshExtension 'Microsoft.KubernetesConfiguration/extensions@2023-05-01' = {
+  name: 'chaos-mesh'
+  scope: aksCluster
+  properties: {
+    extensionType: 'Microsoft.Chaos'
+    autoUpgradeMinorVersion: true
+    releaseTrain: 'Stable'
+  }
+}
+
 // Chaos Studio Target for AKS
 resource chaosTarget 'Microsoft.Chaos/targets@2024-01-01' = {
   name: 'Microsoft-AzureKubernetesServiceChaosMesh'
   scope: aksCluster
   properties: {}
+  dependsOn: [
+    chaosMeshExtension
+  ]
 }
 
 // Capability: Pod Chaos
@@ -65,5 +80,17 @@ resource experiment 'Microsoft.Chaos/experiments@2024-01-01' = {
         ]
       }
     ]
+  }
+}
+
+// Role assignment: Chaos experiment identity → AKS Cluster Admin
+// Required for Chaos Mesh pod-kill experiments on AKS
+resource experimentAksClusterAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(aksCluster.id, experiment.id, 'aks-cluster-admin')
+  scope: aksCluster
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0ab0b1a8-8aac-4efd-b8c2-3ee1fb270be8') // Azure Kubernetes Service Cluster Admin Role
+    principalId: experiment.identity.principalId
+    principalType: 'ServicePrincipal'
   }
 }

@@ -9,17 +9,17 @@
         <collectionProp name="Arguments.arguments">
           <elementProp name="MENU_API_HOST" elementType="Argument">
             <stringProp name="Argument.name">MENU_API_HOST</stringProp>
-            <stringProp name="Argument.value">${__P(MENU_API_HOST,localhost)}</stringProp>
+            <stringProp name="Argument.value">${__groovy(System.getenv("MENU_API_HOST") ?: props.get("MENU_API_HOST") ?: "localhost")}</stringProp>
             <stringProp name="Argument.metadata">=</stringProp>
           </elementProp>
           <elementProp name="ORDER_API_HOST" elementType="Argument">
             <stringProp name="Argument.name">ORDER_API_HOST</stringProp>
-            <stringProp name="Argument.value">${__P(ORDER_API_HOST,localhost)}</stringProp>
+            <stringProp name="Argument.value">${__groovy(System.getenv("ORDER_API_HOST") ?: props.get("ORDER_API_HOST") ?: "localhost")}</stringProp>
             <stringProp name="Argument.metadata">=</stringProp>
           </elementProp>
           <elementProp name="PAYMENT_HOST" elementType="Argument">
             <stringProp name="Argument.name">PAYMENT_HOST</stringProp>
-            <stringProp name="Argument.value">${__P(PAYMENT_HOST,localhost)}</stringProp>
+            <stringProp name="Argument.value">${__groovy(System.getenv("PAYMENT_HOST") ?: props.get("PAYMENT_HOST") ?: "localhost")}</stringProp>
             <stringProp name="Argument.metadata">=</stringProp>
           </elementProp>
         </collectionProp>
@@ -120,10 +120,68 @@
         </ConstantThroughputTimer>
         <hashTree/>
 
+        <JSR223PreProcessor guiclass="TestBeanGUI" testclass="JSR223PreProcessor" testname="Generate Random Order Data" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters"></stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script">
+import java.util.UUID
+
+def rand = new Random()
+
+// Random customer from seeded data
+def customerIds = [
+    "00000000-0000-0000-0000-000000000001",
+    "00000000-0000-0000-0000-000000000002",
+    "00000000-0000-0000-0000-000000000003",
+    "00000000-0000-0000-0000-000000000004",
+    "00000000-0000-0000-0000-000000000005"
+]
+vars.put("customerId", customerIds[rand.nextInt(customerIds.size())])
+
+// Random restaurant
+vars.put("restaurantId", "restaurant-" + (rand.nextInt(5) + 1))
+
+// Menu items pool
+def menuItems = [
+    ["name": "Classic Burger", "price": 12.99],
+    ["name": "Truffle Fries", "price": 7.99],
+    ["name": "Milkshake", "price": 6.99],
+    ["name": "Caesar Salad", "price": 10.99],
+    ["name": "Margherita Pizza", "price": 14.99],
+    ["name": "Grilled Chicken Wrap", "price": 11.49],
+    ["name": "Fish and Chips", "price": 13.99],
+    ["name": "Veggie Bowl", "price": 9.99]
+]
+
+// Pick 1-3 random unique items with random quantities
+def numItems = rand.nextInt(3) + 1
+def selectedItems = []
+def total = 0.0
+def shuffled = (0..&lt;menuItems.size()).toList()
+Collections.shuffle(shuffled, rand)
+for (int i = 0; i &lt; numItems; i++) {
+    def item = menuItems[shuffled[i]]
+    def qty = rand.nextInt(2) + 1
+    selectedItems.add("{\"name\":\"" + item.name + "\",\"price\":" + item.price + ",\"quantity\":" + qty + "}")
+    total += item.price * qty
+}
+
+vars.put("orderItems", "[" + selectedItems.join(",") + "]")
+vars.put("totalAmount", String.format("%.2f", total))
+
+// Random payment method
+def paymentMethods = ["credit_card", "debit_card", "apple_pay", "google_pay"]
+vars.put("paymentMethod", paymentMethods[rand.nextInt(paymentMethods.size())])
+          </stringProp>
+        </JSR223PreProcessor>
+        <hashTree/>
+
         <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /orders" enabled="true">
           <stringProp name="HTTPSampler.domain">${ORDER_API_HOST}</stringProp>
           <stringProp name="HTTPSampler.port"></stringProp>
-          <stringProp name="HTTPSampler.protocol">https</stringProp>
+          <stringProp name="HTTPSampler.protocol">${__P(ORDER_API_PROTOCOL,http)}</stringProp>
           <stringProp name="HTTPSampler.path">/orders</stringProp>
           <stringProp name="HTTPSampler.method">POST</stringProp>
           <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
@@ -139,7 +197,7 @@
             <collectionProp name="Arguments.arguments">
               <elementProp name="" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">false</boolProp>
-                <stringProp name="Argument.value">{"customerId":"00000000-0000-0000-0000-000000000001","restaurantId":"restaurant-1","items":[{"name":"Classic Burger","price":12.99}],"totalAmount":12.99}</stringProp>
+                <stringProp name="Argument.value">{"customerId":"${customerId}","restaurantId":"${restaurantId}","items":${orderItems},"totalAmount":${totalAmount},"paymentMethod":"${paymentMethod}"}</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
               </elementProp>
             </collectionProp>
@@ -185,10 +243,34 @@
         </ConstantThroughputTimer>
         <hashTree/>
 
+        <JSR223PreProcessor guiclass="TestBeanGUI" testclass="JSR223PreProcessor" testname="Generate Random Payment Data" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters"></stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script">
+import java.util.UUID
+
+def rand = new Random()
+
+// Random order ID (UUID)
+vars.put("orderId", UUID.randomUUID().toString())
+
+// Random amount between 5.00 and 59.99
+def amount = (rand.nextInt(5500) + 500) / 100.0
+vars.put("payAmount", String.format("%.2f", amount))
+
+// Random payment method
+def paymentMethods = ["credit_card", "debit_card", "apple_pay", "google_pay"]
+vars.put("payMethod", paymentMethods[rand.nextInt(paymentMethods.size())])
+          </stringProp>
+        </JSR223PreProcessor>
+        <hashTree/>
+
         <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="POST /pay" enabled="true">
           <stringProp name="HTTPSampler.domain">${PAYMENT_HOST}</stringProp>
           <stringProp name="HTTPSampler.port"></stringProp>
-          <stringProp name="HTTPSampler.protocol">https</stringProp>
+          <stringProp name="HTTPSampler.protocol">${__P(PAYMENT_PROTOCOL,http)}</stringProp>
           <stringProp name="HTTPSampler.path">/pay</stringProp>
           <stringProp name="HTTPSampler.method">POST</stringProp>
           <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
@@ -204,7 +286,7 @@
             <collectionProp name="Arguments.arguments">
               <elementProp name="" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">false</boolProp>
-                <stringProp name="Argument.value">{"orderId":"00000000-0000-0000-0000-000000000001","amount":12.99,"paymentMethod":"credit_card"}</stringProp>
+                <stringProp name="Argument.value">{"orderId":"${orderId}","amount":${payAmount},"paymentMethod":"${payMethod}"}</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
               </elementProp>
             </collectionProp>

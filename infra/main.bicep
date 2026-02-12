@@ -124,6 +124,7 @@ module aks 'br/public:avm/res/container-service/managed-cluster:0.12.0' = {
     disableLocalAccounts: false
     omsAgentEnabled: true
     monitoringWorkspaceResourceId: logAnalytics.outputs.resourceId
+    publicNetworkAccess: 'Enabled'
     webApplicationRoutingEnabled: true
     tags: tags
   }
@@ -494,7 +495,6 @@ module sreAgent './modules/sre-agent.bicep' = if (enableSreAgent) {
     agentName: '${prefix}-sre'
     location: location
     userAssignedIdentityId: sreAgentIdentity.outputs.resourceId
-    appInsightsResourceId: appInsights.outputs.resourceId
     appInsightsAppId: appInsights.outputs.applicationId
     appInsightsConnectionString: appInsights.outputs.connectionString
     accessLevel: sreAgentAccessLevel

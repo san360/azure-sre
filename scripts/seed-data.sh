@@ -16,6 +16,9 @@ NUM_RESTAURANTS="${SEED_RESTAURANTS:-15}"
 RESOURCE_GROUP="${RESOURCE_GROUP:-rg-contoso-meals}"
 SEED_IDS_FILE="/tmp/contoso-seed-ids.env"
 BATCH_TAG=$(date +%s)  # Unique tag per run
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="${PROJECT_ROOT}/.env"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -28,6 +31,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Load from .env if available (provides MENU_API_URL, ORDER_API_URL)
+if [ -f "$ENV_FILE" ] && { [ -z "${MENU_API_URL:-}" ] || [ -z "${ORDER_API_URL:-}" ]; }; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
+
 echo "============================================="
 echo "  Contoso Meals — Dynamic Data Seeder"
 echo "============================================="
@@ -37,7 +47,7 @@ echo "  Restaurants:  ${NUM_RESTAURANTS}"
 echo ""
 
 #######################################################################
-# Discover endpoints (unless overridden)
+# Discover endpoints (unless overridden by args or .env)
 #######################################################################
 if [ -z "${MENU_API_URL:-}" ]; then
   echo "Discovering Menu API endpoint..."
@@ -53,12 +63,9 @@ if [ -z "${ORDER_API_URL:-}" ]; then
   if [ -n "$ORDER_API_IP" ]; then
     ORDER_API_URL="http://${ORDER_API_IP}"
   else
-    echo "  AKS service is ClusterIP. Starting port-forward..."
-    kubectl port-forward svc/order-api 8081:80 -n production &>/dev/null &
-    PF_PID=$!
-    sleep 3
-    ORDER_API_URL="http://localhost:8081"
-    trap "kill $PF_PID 2>/dev/null" EXIT
+    echo "  ERROR: ORDER_API_URL not set and auto-discovery failed."
+    echo "  Set ORDER_API_URL in .env or pass --order-api <url>."
+    exit 1
   fi
 fi
 
