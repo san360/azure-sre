@@ -18,9 +18,10 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2024-09-01' exis
 var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 
 // AcrPull role assignment: AKS kubelet identity → ACR
-// Standard GUID pattern: guid(scope, principalId, roleDefinitionId) ensures idempotency
+// Standard GUID pattern: guid(scope, clusterResourceId, roleDefinitionId) ensures idempotency
+// Uses aksCluster.id (not .properties) because role assignment 'name' must be calculable at deployment start (BCP120)
 resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, aksCluster.properties.identityProfile.kubeletidentity.objectId, acrPullRoleId)
+  name: guid(acr.id, aksCluster.id, acrPullRoleId)
   scope: acr
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)

@@ -4,6 +4,7 @@ targetScope = 'subscription'
 param location string = 'swedencentral'
 
 @description('Environment prefix')
+@minLength(3)
 param prefix string = 'contoso-meals'
 
 @description('Enable Chaos Studio experiments')
@@ -540,8 +541,8 @@ output postgresServerFqdn string = postgres.outputs.fqdn
 output cosmosDbAccountName string = cosmosdb.outputs.name
 output logAnalyticsWorkspaceId string = logAnalytics.outputs.resourceId
 output containerAppEnvDefaultDomain string = containerAppEnv.outputs.defaultDomain
-output jiraSmFqdn string = enableJira ? jiraSm.outputs.fqdn : ''
-output mcpAtlassianFqdn string = enableJira ? mcpAtlassian.outputs.fqdn : ''
+output jiraSmFqdn string = enableJira ? jiraSm!.outputs.fqdn : ''
+output mcpAtlassianFqdn string = enableJira ? mcpAtlassian!.outputs.fqdn : ''
 
 // SRE Agent identity outputs — use these when configuring the Azure MCP connector
 output sreAgentIdentityName string = sreAgentIdentity.outputs.name
@@ -550,8 +551,8 @@ output sreAgentIdentityPrincipalId string = sreAgentIdentity.outputs.principalId
 output sreAgentIdentityResourceId string = sreAgentIdentity.outputs.resourceId
 
 // SRE Agent resource outputs (when deployed via Bicep)
-output sreAgentId string = enableSreAgent ? sreAgent.outputs.agentId : ''
-output sreAgentPortalUrl string = enableSreAgent ? sreAgent.outputs.agentPortalUrl : ''
+output sreAgentId string = enableSreAgent ? sreAgent!.outputs.agentId : ''
+output sreAgentPortalUrl string = enableSreAgent ? sreAgent!.outputs.agentPortalUrl : ''
 
 // azd-convention outputs (used by azd for service deployment)
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer
