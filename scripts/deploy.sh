@@ -196,9 +196,22 @@ if [ -n "$SRE_MI_CLIENT_ID" ]; then
   echo "  AZURE_CLIENT_ID: $SRE_MI_CLIENT_ID"
   echo ""
 fi
-echo "Next steps:"
-echo "  1. Run baseline load test:  ./scripts/generate-load.sh 30"
-echo "  2. Set up Jira:             ./scripts/setup-jira.sh"
-echo "  3. Create SRE Agent in Azure Portal"
-echo "  4. Configure MCP, Teams, Knowledge Base (see demo-proposal.md Part 1)"
+if [ -n "$SRE_AGENT_PORTAL_URL" ]; then
+  echo "SRE Agent (deployed via Bicep):"
+  echo "  Portal URL:      $SRE_AGENT_PORTAL_URL"
+  echo "  Access Level:    High (Reader + Contributor + Log Analytics Reader)"
+  echo "  Mode:            Review"
+  echo ""
+  echo "Next steps:"
+  echo "  1. Run baseline load test:  ./scripts/generate-load.sh 30"
+  echo "  2. Set up Jira:             ./scripts/setup-jira.sh"
+  echo "  3. Open SRE Agent in portal and configure MCP, Teams, Knowledge Base"
+  echo "     (see demo-proposal.md Part 1)"
+else
+  echo "Next steps:"
+  echo "  1. Run baseline load test:  ./scripts/generate-load.sh 30"
+  echo "  2. Set up Jira:             ./scripts/setup-jira.sh"
+  echo "  3. Create SRE Agent in Azure Portal"
+  echo "  4. Configure MCP, Teams, Knowledge Base (see demo-proposal.md Part 1)"
+fi
 echo ""

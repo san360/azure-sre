@@ -156,10 +156,14 @@ module loadTest 'br/public:avm/res/load-test-service/load-test:0.4.0' = {
 ```
 Resource Group: rg-contoso-meals (Sweden Central)
 │
-├── Azure SRE Agent
-│   ├── Application Insights (auto-provisioned)
+├── Azure SRE Agent: contoso-meals-sre
+│   │  (Bicep: Microsoft.App/agents@2025-05-01-preview)
+│   ├── Application Insights (connected via Bicep)
 │   ├── Log Analytics Workspace (auto-provisioned)
-│   ├── User-Assigned Managed Identity: id-contoso-meals-sre-agent (Reader on RG)
+│   ├── User-Assigned Managed Identity: id-contoso-meals-sre-agent
+│   │   └── Tiered RBAC: Reader + Contributor + Log Analytics Reader + Key Vault roles
+│   ├── Smart Detection Alert: Failure Anomalies (auto-configured)
+│   ├── SRE Agent Administrator role: auto-assigned to deployer
 │   ├── Connector: Azure MCP Server (42+ service tool groups)
 │   ├── Connector: Microsoft Teams
 │   ├── Connector: Outlook
@@ -302,16 +306,30 @@ Azure Monitor Alert fires
 
 **Why this part matters:** Most demos skip setup. But the setup IS the story here — connecting the MCP server shows 42+ Azure services becoming available to the agent instantly. No custom code. No integration development. That's the aha moment.
 
-#### Scene 1.1: Create the SRE Agent (3 min)
+#### Scene 1.0: Infrastructure Deployed via Bicep (2 min)
 
-Live in the Azure Portal:
-1. Search for **Azure SRE Agent** → Create
-2. Select subscription, resource group `rg-contoso-meals`, region `Sweden Central`
-3. Name: `contoso-meals-sre`
-4. Select managed resource groups (check `rg-contoso-meals`)
-5. Click **Create**
+Show the deployment output from `az deployment sub create`. The SRE Agent was provisioned alongside all other infrastructure — not manually in the portal.
 
-**Narrator:** *"Contoso Meals is our food ordering platform. Orders come in through AKS, menus are served from Container Apps and Cosmos DB, and everything writes to PostgreSQL. We've just deployed an SRE Agent to watch all of it. But right now, it only knows about these resources through Azure Monitor. Let's give it a much broader toolkit."*
+**Narrator:** *"Everything you see — AKS, PostgreSQL, Cosmos DB, Container Apps, Chaos Studio, and the SRE Agent itself — was deployed in a single Bicep template. No portal clicking. The agent is an infrastructure resource, defined and versioned like everything else."*
+
+Show the deployment output:
+```
+SRE Agent (deployed via Bicep):
+  Portal URL:      https://portal.azure.com/#view/Microsoft_Azure_PaasServerless/AgentFrameBlade.ReactView/id/...
+  Access Level:    High (Reader + Contributor + Log Analytics Reader)
+  Mode:            Review
+```
+
+**Key talking point:** The `Microsoft.App/agents@2025-05-01-preview` resource type means the SRE Agent is a first-class Azure resource — deployable via Bicep, ARM, Terraform, or any IaC tool. It supports tiered access levels (High/Low), configurable modes (Review/Autonomous/ReadOnly), and cross-subscription targeting for enterprise multi-RG environments.
+
+#### Scene 1.1: Open the SRE Agent (1 min)
+
+Click the Portal URL from the deployment output (or navigate to the SRE Agent in the portal):
+1. Show the agent is already provisioned with Application Insights connected
+2. Show the user-assigned managed identity (`id-contoso-meals-sre-agent`) is already attached
+3. Show the SRE Agent Administrator role was auto-assigned to the deployer
+
+**Narrator:** *"The agent was deployed with the infrastructure. It already has its managed identity, Application Insights telemetry, and Smart Detection alerts configured. No setup wizard. No manual configuration. Just IaC."*
 
 #### Scene 1.2: Connect Azure MCP Server (5 min)
 
@@ -689,9 +707,12 @@ The agent uses `jira_search` with JQL: `project = CONTOSO AND labels = payment-s
 ```
 contoso-meals-sre/
 ├── infra/
-│   ├── main.bicep                # Orchestrator — deploys all modules
+│   ├── main.bicep                # Orchestrator — deploys all modules including SRE Agent
 │   ├── main.parameters.json      # Environment-specific configuration
 │   └── modules/
+│       ├── sre-agent.bicep       # SRE Agent resource (Microsoft.App/agents@2025-05-01-preview)
+│       ├── sre-agent-role.bicep  # Tiered role assignments (High/Low access)
+│       ├── sre-agent-role-target.bicep  # Cross-RG role assignments
 │       ├── monitoring.bicep      # Log Analytics, App Insights, Alerts
 │       └── chaos.bicep           # Chaos Studio targets + experiments
 ├── app/
@@ -740,6 +761,23 @@ param enableLoadTesting bool = true
 
 @description('Enable Jira Service Management deployment')
 param enableJira bool = true
+
+@description('Enable Azure SRE Agent provisioning via Bicep')
+param enableSreAgent bool = true
+
+@description('SRE Agent access level: High (Contributor) or Low (Reader)')
+@allowed(['High', 'Low'])
+param sreAgentAccessLevel string = 'High'
+
+@description('SRE Agent mode: Review (requires approval), Autonomous, or ReadOnly')
+@allowed(['Review', 'Autonomous', 'ReadOnly'])
+param sreAgentMode string = 'Review'
+
+@description('Additional resource group names the SRE Agent should have access to')
+param targetResourceGroups array = []
+
+@description('Subscription IDs for target resource groups (parallel array)')
+param targetSubscriptions array = []
 
 // Resource Group
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -1018,6 +1056,33 @@ module chaos './modules/chaos.bicep' = if (enableChaos) {
     prefix: prefix
   }
 }
+
+// Azure SRE Agent (optional) — deployed via Bicep instead of manual portal creation
+// Adapted from: https://github.com/microsoft/sre-agent/blob/main/samples/bicep-deployment/
+module sreAgent './modules/sre-agent.bicep' = if (enableSreAgent) {
+  scope: rg
+  name: 'sre-agent'
+  params: {
+    agentName: '${prefix}-sre'
+    location: location
+    userAssignedIdentityId: sreAgentIdentity.outputs.resourceId
+    appInsightsResourceId: appInsights.outputs.resourceId
+    appInsightsAppId: appInsights.outputs.applicationId
+    appInsightsConnectionString: appInsights.outputs.connectionString
+    accessLevel: sreAgentAccessLevel
+    agentMode: sreAgentMode
+  }
+}
+
+// Cross-RG role assignments (enterprise multi-RG monitoring)
+module targetRoleAssignments 'modules/sre-agent-role-target.bicep' = [for (targetRG, index) in targetResourceGroups: if (enableSreAgent) {
+  name: 'sre-agent-target-role-${index}'
+  scope: resourceGroup(length(targetSubscriptions) > index ? targetSubscriptions[index] : subscription().subscriptionId, targetRG)
+  params: {
+    userAssignedIdentityPrincipalId: sreAgentIdentity.outputs.principalId
+    accessLevel: sreAgentAccessLevel
+  }
+}]
 ```
 
 ### modules/monitoring.bicep (Alert Rules)
@@ -1142,11 +1207,12 @@ resource experiment 'Microsoft.Chaos/experiments@2024-01-01' = {
 ## 8. Deployment Commands
 
 ```bash
-# Step 1: Deploy infrastructure
+# Step 1: Deploy infrastructure (including SRE Agent via Bicep)
 az deployment sub create \
   --location swedencentral \
   --template-file infra/main.bicep \
   --parameters infra/main.parameters.json
+# Output includes: sreAgentPortalUrl, sreAgentIdentityClientId
 
 # Step 2: Get AKS credentials
 az aks get-credentials \
@@ -1163,10 +1229,11 @@ kubectl apply -f manifests/payment-service.yaml
 # Option B: Quick curl-based baseline
 ./scripts/generate-load.sh 60
 
-# Step 5: Create SRE Agent in portal (manual — see Part 1)
-# Step 6: Configure MCP, Teams, Knowledge Base (manual — see Part 1)
+# Step 5: Open SRE Agent in portal (deployed automatically via Bicep)
+# The deployment output 'sreAgentPortalUrl' provides a direct link
+# Configure MCP, Teams, Knowledge Base (manual — see Part 1)
 
-# Step 7: Wait for Jira SM to initialize (first boot takes 3-5 min)
+# Step 6: Wait for Jira SM to initialize (first boot takes 3-5 min)
 JIRA_FQDN=$(az containerapp show \
   --name jira-sm \
   --resource-group rg-contoso-meals \
@@ -1177,10 +1244,10 @@ until curl -s -o /dev/null -w "%{http_code}" "https://${JIRA_FQDN}/status" | gre
   sleep 10
 done
 
-# Step 8: Run Jira initial setup script (creates project, configures workflow, generates API token)
+# Step 7: Run Jira initial setup script (creates project, configures workflow, generates API token)
 ./scripts/setup-jira.sh
 
-# Step 9: Verify mcp-atlassian is serving MCP endpoint
+# Step 8: Verify mcp-atlassian is serving MCP endpoint
 MCP_FQDN=$(az containerapp show \
   --name mcp-atlassian \
   --resource-group rg-contoso-meals \
@@ -1188,7 +1255,7 @@ MCP_FQDN=$(az containerapp show \
 curl -s "https://${MCP_FQDN}/mcp" | jq .
 # Expected: MCP server info response with 34 available tools
 
-# Step 10: Configure mcp-atlassian as Custom MCP Server in SRE Agent (manual — see Part 4)
+# Step 9: Configure mcp-atlassian as Custom MCP Server in SRE Agent (manual — see Part 4)
 ```
 
 ---
@@ -1230,100 +1297,32 @@ The `samples/bicep-deployment/` folder contains a **subscription-scoped Bicep te
 | `deploy.sh` | Interactive bash script with 3 modes: interactive prompts, config file, and CLI flags |
 | `minimal-sre-agent.parameters.json` | Example parameters file |
 
-#### Key Capabilities We Don't Have Yet
+#### Key Capabilities — Now Implemented
 
-| Capability | Official Template | Our Current Setup |
+| Capability | Official Template | Our Implementation |
 |-----------|-------------------|-------------------|
-| **Automated SRE Agent provisioning** | `Microsoft.App/agents@2025-05-01-preview` resource in Bicep | Manual portal creation in Part 1 Scene 1.1 |
-| **Cross-subscription targeting** | `targetResourceGroups` + `targetSubscriptions` arrays, matched by index | Single resource group only |
-| **Configurable access levels** | `High` (Reader + Contributor + Log Analytics Reader) vs `Low` (Log Analytics Reader only) | Reader role only (`sre-agent-role.bicep`) |
-| **Existing managed identity reuse** | `existingManagedIdentityId` parameter — supports bring-your-own identity | Always creates new identity |
-| **SRE Agent Administrator role** | Auto-assigns `e79298df-d852-4c6d-84f9-5d13249d1e55` (SRE Agent Administrator) to deployer | Not assigned |
-| **Smart Detection alerts** | Failure Anomalies Smart Detector alert rule with Action Group | Not provisioned |
-| **Agent mode selection** | `Review`, `Autonomous`, or `ReadOnly` mode parameter | Not configurable |
+| **Automated SRE Agent provisioning** | `Microsoft.App/agents@2025-05-01-preview` resource in Bicep | `infra/modules/sre-agent.bicep` — deployed alongside all infrastructure |
+| **Cross-subscription targeting** | `targetResourceGroups` + `targetSubscriptions` arrays, matched by index | Supported via `targetResourceGroups` and `targetSubscriptions` parameters in `main.bicep` |
+| **Configurable access levels** | `High` (Reader + Contributor + Log Analytics Reader) vs `Low` (Log Analytics Reader only) | `sreAgentAccessLevel` parameter with tiered role assignments in `sre-agent-role.bicep` |
+| **Existing managed identity reuse** | `existingManagedIdentityId` parameter — supports bring-your-own identity | Uses pre-existing AVM-provisioned identity (`id-contoso-meals-sre-agent`) |
+| **SRE Agent Administrator role** | Auto-assigns `e79298df-d852-4c6d-84f9-5d13249d1e55` (SRE Agent Administrator) to deployer | Auto-assigned in `sre-agent.bicep` via `deployer().objectId` |
+| **Smart Detection alerts** | Failure Anomalies Smart Detector alert rule with Action Group | Provisioned in `sre-agent.bicep` with Smart Detection Action Group |
+| **Agent mode selection** | `Review`, `Autonomous`, or `ReadOnly` mode parameter | `sreAgentMode` parameter in `main.bicep` (default: Review) |
+| **Key Vault roles** | Certificate User + Secrets User roles | Enabled in `sre-agent-role.bicep` with `enableKeyVault: true` |
 
-#### Integration Plan for Contoso Meals
+#### What Was Done
 
-**Goal:** Replace the manual SRE Agent creation in Part 1 Scene 1.1 with a single `az deployment sub create` that provisions the agent alongside all other infrastructure.
+The manual SRE Agent creation in Part 1 Scene 1.1 has been replaced with a single `az deployment sub create` that provisions the agent alongside all other infrastructure.
 
-1. **Add `sre-agent.bicep` module to `infra/modules/`** — Adapted from `sre-agent-resources.bicep`, scoped to our resource group, with Contoso Meals naming conventions
-2. **Upgrade `sre-agent-role.bicep`** — Adopt the tiered role model (High/Low access) from `role-assignments-minimal.bicep`, including Key Vault roles
-3. **Add target resource group support** — Wire `targetResourceGroups` parameter through `main.bicep` so the SRE Agent can monitor additional RGs (useful for enterprise demos where apps span multiple RGs)
-4. **Adopt the interactive `deploy.sh` pattern** — Either integrate into our existing `scripts/deploy.sh` or provide a "one-click SRE Agent" companion script
+1. **Added `infra/modules/sre-agent.bicep`** — Adapted from `sre-agent-resources.bicep`, deploys `Microsoft.App/agents@2025-05-01-preview` with Smart Detection alerts and SRE Agent Administrator role
+2. **Upgraded `infra/modules/sre-agent-role.bicep`** — Tiered role model (High/Low access) from `role-assignments-minimal.bicep`, including Key Vault Certificate User and Secrets User roles
+3. **Added `infra/modules/sre-agent-role-target.bicep`** — Cross-RG role assignments from `role-assignments-target.bicep` for multi-RG enterprise scenarios
+4. **Updated `infra/main.bicep`** — New parameters (`enableSreAgent`, `sreAgentAccessLevel`, `sreAgentMode`, `targetResourceGroups`, `targetSubscriptions`), SRE Agent module invocation, and portal URL output
+5. **Updated `scripts/deploy.sh`** — Retrieves and displays `sreAgentPortalUrl`, conditionally updates next-steps messaging
 
-```bicep
-// infra/modules/sre-agent.bicep (adapted from microsoft/sre-agent samples)
-@description('Name of the SRE Agent')
-param agentName string
+**See actual implementation:** `infra/modules/sre-agent.bicep`, `infra/modules/sre-agent-role.bicep`, `infra/modules/sre-agent-role-target.bicep`
 
-@description('Location for the SRE Agent')
-param location string
-
-@description('Resource ID of the user-assigned managed identity')
-param userAssignedIdentityId string
-
-@description('Application Insights connection string')
-param appInsightsConnectionString string
-
-@description('Application Insights App ID')
-param appInsightsAppId string
-
-@description('Access level: High (Contributor) or Low (Reader)')
-@allowed(['High', 'Low'])
-param accessLevel string = 'High'
-
-@description('Agent mode: Review, Autonomous, ReadOnly')
-@allowed(['Review', 'Autonomous', 'ReadOnly'])
-param agentMode string = 'Review'
-
-#disable-next-line BCP081
-resource sreAgent 'Microsoft.App/agents@2025-05-01-preview' = {
-  name: agentName
-  location: location
-  identity: {
-    type: 'SystemAssigned, UserAssigned'
-    userAssignedIdentities: {
-      '${userAssignedIdentityId}': {}
-    }
-  }
-  properties: {
-    knowledgeGraphConfiguration: {
-      identity: userAssignedIdentityId
-      managedResources: []
-    }
-    actionConfiguration: {
-      accessLevel: accessLevel
-      identity: userAssignedIdentityId
-      mode: agentMode
-    }
-    logConfiguration: {
-      applicationInsightsConfiguration: {
-        appId: appInsightsAppId
-        connectionString: appInsightsConnectionString
-      }
-    }
-  }
-}
-
-// Auto-assign SRE Agent Administrator role to deployer
-resource sreAgentAdminRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(sreAgent.id, deployer().objectId, 'e79298df-d852-4c6d-84f9-5d13249d1e55')
-  scope: sreAgent
-  properties: {
-    roleDefinitionId: resourceId(
-      'Microsoft.Authorization/roleDefinitions',
-      'e79298df-d852-4c6d-84f9-5d13249d1e55' // SRE Agent Administrator
-    )
-    principalId: deployer().objectId
-    principalType: 'User'
-  }
-}
-
-output agentId string = sreAgent.id
-output agentPortalUrl string = 'https://portal.azure.com/#view/Microsoft_Azure_PaasServerless/AgentFrameBlade.ReactView/id/${replace(sreAgent.id, '/', '%2F')}'
-```
-
-**Demo impact:** Part 1 Scene 1.1 transforms from "click through the portal" to "look — the SRE Agent was deployed alongside the entire infrastructure in a single Bicep deployment." This is more enterprise-relevant.
+**Demo impact:** Part 1 Scene 1.0 now shows deployment output with the SRE Agent portal URL — "look, the SRE Agent was deployed alongside the entire infrastructure in a single Bicep deployment." This is more enterprise-relevant than manual portal creation.
 
 ---
 
@@ -1566,19 +1565,20 @@ The `proactive-reliability/SubAgents/` folder includes two new subagents added 2
 
 ### 10.5 Summary — What to Build from Official Samples
 
-| Item | Source | Target in Our Repo | Priority |
-|------|--------|-------------------|----------|
-| SRE Agent Bicep module (`Microsoft.App/agents`) | `sre-agent-resources.bicep` | `infra/modules/sre-agent.bicep` | **P0** — enables fully automated deployment |
-| Tiered role assignments (High/Low) | `role-assignments-minimal.bicep` | Upgrade `infra/modules/sre-agent-role.bicep` | **P0** — enterprise access control |
-| SRE Agent Administrator role assignment | `sre-agent-resources.bicep` | `infra/modules/sre-agent.bicep` | **P1** — deployer can manage agent |
-| Smart Detection alert rules | `sre-agent-resources.bicep` | `infra/modules/monitoring.bicep` | **P1** — proactive anomaly detection |
+| Item | Source | Target in Our Repo | Status |
+|------|--------|-------------------|--------|
+| SRE Agent Bicep module (`Microsoft.App/agents`) | `sre-agent-resources.bicep` | `infra/modules/sre-agent.bicep` | **Done** |
+| Tiered role assignments (High/Low) | `role-assignments-minimal.bicep` | `infra/modules/sre-agent-role.bicep` | **Done** |
+| Cross-subscription targeting parameters | `minimal-sre-agent.bicep` | `infra/main.bicep` + `infra/modules/sre-agent-role-target.bicep` | **Done** |
+| SRE Agent Administrator role assignment | `sre-agent-resources.bicep` | `infra/modules/sre-agent.bicep` | **Done** |
+| Smart Detection alert rules | `sre-agent-resources.bicep` | `infra/modules/sre-agent.bicep` | **Done** |
+| Deploy script SRE Agent output | `deploy.sh` | `scripts/deploy.sh` | **Done** |
 | Incident handler subagent YAML | `pd-azure-resource-error-handler.yaml` | `subagents/contoso-meals-incident-handler.yaml` | **P1** — reusable in Part 3 |
 | Daily health check subagent YAML | `azurehealthcheck.yaml` | `subagents/contoso-meals-health-check.yaml` | **P1** — new demo scene |
 | Baseline capture subagent YAML | `AvgResponseBaseline.yaml` | `subagents/contoso-meals-baseline-capture.yaml` | **P2** — proactive reliability |
 | Deployment health check subagent YAML | `DeploymentHealthCheck.yaml` | `subagents/contoso-meals-deployment-health.yaml` | **P2** — autonomous remediation |
 | Deployment reporter subagent YAML | `DeploymentReporter.yaml` | `subagents/contoso-meals-deployment-reporter.yaml` | **P2** — daily summary |
 | Interactive deploy script | `deploy.sh` | `scripts/deploy-sre-agent.sh` | **P2** — standalone SRE Agent deployment |
-| Cross-subscription targeting parameters | `minimal-sre-agent.bicep` | `infra/main.bicep` parameters | **P3** — enterprise multi-RG demos |
 
 ### 10.6 Updated Reference Resources
 
@@ -1654,7 +1654,8 @@ For customers evaluating ITSM integration. Everything pre-configured.
 - [ ] Deploy Kubernetes manifests to AKS
 - [ ] Create URL-based load tests in Azure Load Testing (baseline + lunch rush)
 - [ ] Start baseline load test — run for 30+ minutes to build metrics history
-- [ ] Create SRE Agent and configure MCP, Teams, Knowledge Base
+- [ ] Verify SRE Agent was deployed (check portal URL from deployment output)
+- [ ] Configure MCP, Teams, Knowledge Base in SRE Agent portal
 - [ ] Upload `contoso-meals-runbook.md` to Knowledge Base
 - [ ] Test Chaos Studio experiment (run once, verify pods restart, verify alert fires)
 - [ ] Store MCP connector settings (take screenshots for fallback)
