@@ -151,7 +151,7 @@ app.MapGet("/ready", async (OrdersDbContext db) =>
 .WithTags("Health");
 
 // --- GET /orders — list orders with optional filtering (F-ORDER-1) ---
-app.MapGet("/orders", async (OrdersDbContext db, Guid? customerId, string? status) =>
+app.MapGet("/orders", async (OrdersDbContext db, Guid? customerId, string? status, int? page, int? pageSize) =>
 {
     IQueryable<Order> query = db.Orders;
 
@@ -161,12 +161,17 @@ app.MapGet("/orders", async (OrdersDbContext db, Guid? customerId, string? statu
     if (!string.IsNullOrWhiteSpace(status))
         query = query.Where(o => o.Status == status);
 
+    var totalCount = await query.CountAsync();
+    var currentPage = Math.Max(page ?? 1, 1);
+    var size = Math.Clamp(pageSize ?? 50, 1, 200);
+
     var orders = await query
         .OrderByDescending(o => o.CreatedAt)
-        .Take(50)
+        .Skip((currentPage - 1) * size)
+        .Take(size)
         .ToListAsync();
 
-    return Results.Ok(orders);
+    return Results.Ok(new { items = orders, totalCount, page = currentPage, pageSize = size });
 })
 .WithTags("Orders");
 
@@ -374,14 +379,19 @@ app.MapDelete("/orders/{id:guid}", async (Guid id, OrdersDbContext db) =>
 .WithTags("Orders");
 
 // --- Customer endpoints (F-ORDER-3) ---
-app.MapGet("/customers", async (OrdersDbContext db) =>
+app.MapGet("/customers", async (OrdersDbContext db, int? page, int? pageSize) =>
 {
+    var totalCount = await db.Customers.CountAsync();
+    var currentPage = Math.Max(page ?? 1, 1);
+    var size = Math.Clamp(pageSize ?? 50, 1, 200);
+
     var customers = await db.Customers
         .OrderByDescending(c => c.CreatedAt)
-        .Take(50)
+        .Skip((currentPage - 1) * size)
+        .Take(size)
         .ToListAsync();
 
-    return Results.Ok(customers);
+    return Results.Ok(new { items = customers, totalCount, page = currentPage, pageSize = size });
 })
 .WithTags("Customers");
 

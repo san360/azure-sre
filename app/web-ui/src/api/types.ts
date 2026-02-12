@@ -58,6 +58,13 @@ export interface PaymentResult {
   error?: string;
 }
 
+export interface PaginatedResponse<T> {
+  items: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface CreateOrderResponse {
   order: Order;
   payment?: PaymentResult;

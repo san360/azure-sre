@@ -21,7 +21,7 @@ export default function OrderHistory() {
   useEffect(() => {
     const customerId = localStorage.getItem('contoso-customerId');
     getOrders(customerId || undefined)
-      .then(setOrders)
+      .then(res => setOrders(res.items))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);

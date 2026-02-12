@@ -36,6 +36,10 @@ spec:
                   key: appinsights-connection-string
             - name: ASPNETCORE_ENVIRONMENT
               value: Production
+            - name: PaymentService__BaseUrl
+              value: "http://payment-service.production.svc.cluster.local"
+            - name: MenuApi__BaseUrl
+              value: "http://menu-api.production.svc.cluster.local"
           resources:
             requests:
               cpu: 100m
@@ -69,7 +73,7 @@ metadata:
     app: order-api
     app.kubernetes.io/part-of: contoso-meals
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: order-api
   ports:

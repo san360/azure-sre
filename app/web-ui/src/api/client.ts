@@ -1,4 +1,4 @@
-import type { Restaurant, Menu, Order, OrderDetails, Customer, CreateOrderResponse } from './types';
+import type { Restaurant, Menu, Order, OrderDetails, Customer, CreateOrderResponse, PaginatedResponse } from './types';
 
 const MENU_API = import.meta.env.VITE_MENU_API_URL || '/api/menu';
 const ORDER_API = import.meta.env.VITE_ORDER_API_URL || '/api/orders';
@@ -36,12 +36,14 @@ export async function getMenu(restaurantId: string): Promise<Menu> {
 }
 
 // --- Orders ---
-export async function getOrders(customerId?: string, status?: string): Promise<Order[]> {
+export async function getOrders(customerId?: string, status?: string, page?: number, pageSize?: number): Promise<PaginatedResponse<Order>> {
   const params = new URLSearchParams();
   if (customerId) params.set('customerId', customerId);
   if (status) params.set('status', status);
+  if (page) params.set('page', String(page));
+  if (pageSize) params.set('pageSize', String(pageSize));
   const qs = params.toString();
-  return fetchJson<Order[]>(`${ORDER_API}/orders${qs ? `?${qs}` : ''}`);
+  return fetchJson<PaginatedResponse<Order>>(`${ORDER_API}/orders${qs ? `?${qs}` : ''}`);
 }
 
 export async function getOrder(id: string): Promise<Order> {
@@ -73,8 +75,12 @@ export async function cancelOrder(id: string): Promise<{ id: string; status: str
 }
 
 // --- Customers ---
-export async function getCustomers(): Promise<Customer[]> {
-  return fetchJson<Customer[]>(`${ORDER_API}/customers`);
+export async function getCustomers(page?: number, pageSize?: number): Promise<PaginatedResponse<Customer>> {
+  const params = new URLSearchParams();
+  if (page) params.set('page', String(page));
+  if (pageSize) params.set('pageSize', String(pageSize));
+  const qs = params.toString();
+  return fetchJson<PaginatedResponse<Customer>>(`${ORDER_API}/customers${qs ? `?${qs}` : ''}`);
 }
 
 export async function getCustomer(id: string): Promise<Customer> {

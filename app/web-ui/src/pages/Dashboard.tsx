@@ -20,6 +20,11 @@ export default function Dashboard() {
   const [tab, setTab] = useState<Tab>('orders');
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [totalCustomers, setTotalCustomers] = useState(0);
+  const [orderPage, setOrderPage] = useState(1);
+  const [customerPage, setCustomerPage] = useState(1);
+  const pageSize = 50;
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,28 +39,32 @@ export default function Dashboard() {
   }, [customers]);
 
   useEffect(() => {
-    getOrders()
-      .then(setOrders)
+    setLoadingOrders(true);
+    getOrders(undefined, undefined, orderPage, pageSize)
+      .then(res => { setOrders(res.items); setTotalOrders(res.totalCount); })
       .catch(e => setError(e.message))
       .finally(() => setLoadingOrders(false));
+  }, [orderPage]);
 
-    getCustomers()
-      .then(setCustomers)
+  useEffect(() => {
+    setLoadingCustomers(true);
+    getCustomers(customerPage, pageSize)
+      .then(res => { setCustomers(res.items); setTotalCustomers(res.totalCount); })
       .catch(e => setError(prev => prev || e.message))
       .finally(() => setLoadingCustomers(false));
-  }, []);
+  }, [customerPage]);
 
   // Refresh data
   function refresh() {
     setLoadingOrders(true);
     setLoadingCustomers(true);
     setError(null);
-    getOrders()
-      .then(setOrders)
+    getOrders(undefined, undefined, orderPage, pageSize)
+      .then(res => { setOrders(res.items); setTotalOrders(res.totalCount); })
       .catch(e => setError(e.message))
       .finally(() => setLoadingOrders(false));
-    getCustomers()
-      .then(setCustomers)
+    getCustomers(customerPage, pageSize)
+      .then(res => { setCustomers(res.items); setTotalCustomers(res.totalCount); })
       .catch(e => setError(prev => prev || e.message))
       .finally(() => setLoadingCustomers(false));
   }
@@ -69,8 +78,8 @@ export default function Dashboard() {
     orders.forEach(o => {
       statusCounts[o.status] = (statusCounts[o.status] || 0) + 1;
     });
-    return { totalOrders: orders.length, totalRevenue, totalCustomers: customers.length, statusCounts };
-  }, [orders, customers]);
+    return { totalOrders, totalRevenue, totalCustomers, statusCounts };
+  }, [orders, customers, totalOrders, totalCustomers]);
 
   // Filtered orders
   const filteredOrders = useMemo(() => {
@@ -193,7 +202,7 @@ export default function Dashboard() {
             tab === 'orders' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
           }`}
         >
-          Orders ({orders.length})
+          Orders ({totalOrders})
         </button>
         <button
           onClick={() => setTab('customers')}
@@ -201,7 +210,7 @@ export default function Dashboard() {
             tab === 'customers' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'
           }`}
         >
-          Customers ({customers.length})
+          Customers ({totalCustomers})
         </button>
       </div>
 
@@ -301,6 +310,30 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+          {/* Order pagination */}
+          {!loading && totalOrders > pageSize && (
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-sm text-gray-500">
+                Showing {(orderPage - 1) * pageSize + 1}–{Math.min(orderPage * pageSize, totalOrders)} of {totalOrders} orders
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setOrderPage(p => Math.max(1, p - 1))}
+                  disabled={orderPage <= 1}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setOrderPage(p => p + 1)}
+                  disabled={orderPage * pageSize >= totalOrders}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -359,6 +392,30 @@ export default function Dashboard() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+          {/* Customer pagination */}
+          {!loadingCustomers && totalCustomers > pageSize && (
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-sm text-gray-500">
+                Showing {(customerPage - 1) * pageSize + 1}–{Math.min(customerPage * pageSize, totalCustomers)} of {totalCustomers} customers
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCustomerPage(p => Math.max(1, p - 1))}
+                  disabled={customerPage <= 1}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setCustomerPage(p => p + 1)}
+                  disabled={customerPage * pageSize >= totalCustomers}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition"
+                >
+                  Next
+                </button>
               </div>
             </div>
           )}
