@@ -176,7 +176,7 @@ public class CosmosDbService
     public async Task<Menu> CreateMenuAsync(Menu menu)
     {
         menu.LastUpdated = DateTime.UtcNow;
-        var response = await _menusContainer.CreateItemAsync(menu, new PartitionKey(menu.RestaurantId));
+        var response = await _menusContainer.UpsertItemAsync(menu, new PartitionKey(menu.RestaurantId));
         return response.Resource;
     }
 
@@ -206,27 +206,17 @@ public class CosmosDbService
         var restaurantsContainer = db.GetContainer("restaurants");
         var menusContainer = db.GetContainer("menus");
 
-        // Check if restaurants container already has data
-        var checkQuery = new QueryDefinition("SELECT VALUE COUNT(1) FROM c");
-        using var countIterator = restaurantsContainer.GetItemQueryIterator<int>(checkQuery);
-        var countResponse = await countIterator.ReadNextAsync();
-        if (countResponse.FirstOrDefault() > 0)
-        {
-            return; // Data already seeded
-        }
-
-        // Seed restaurants
+        // Upsert all seed restaurants and menus (ensures all 12 exist even after code updates)
         var restaurants = GetSeedRestaurants();
         foreach (var restaurant in restaurants)
         {
-            await restaurantsContainer.CreateItemAsync(restaurant, new PartitionKey(restaurant.City));
+            await restaurantsContainer.UpsertItemAsync(restaurant, new PartitionKey(restaurant.City));
         }
 
-        // Seed menus
         var menus = GetSeedMenus(restaurants);
         foreach (var menu in menus)
         {
-            await menusContainer.CreateItemAsync(menu, new PartitionKey(menu.RestaurantId));
+            await menusContainer.UpsertItemAsync(menu, new PartitionKey(menu.RestaurantId));
         }
     }
 

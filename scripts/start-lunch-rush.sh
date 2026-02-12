@@ -52,7 +52,7 @@ fi
 RESOURCE_GROUP="${RESOURCE_GROUP:-rg-contoso-meals}"
 AKS_CLUSTER="${AKS_CLUSTER:-aks-contoso-meals}"
 LOAD_TEST_RESOURCE="${LOAD_TEST_RESOURCE:-lt-contoso-meals}"
-EXPERIMENT_NAME="exp-contoso-meals-pod-kill"
+EXPERIMENT_NAME="exp-contoso-meals-payment-incident"
 TEST_RUN_ID="${LOAD_TEST_ID}-$(date +%Y%m%d-%H%M%S)"
 
 echo ""
@@ -63,7 +63,7 @@ echo "╚═══════════════════════�
 echo ""
 echo "  Load Test:  ${LOAD_TEST_ID} (Azure Load Testing)  skip=${SKIP_LOAD}"
 echo "  Test Run:   ${TEST_RUN_ID}"
-echo "  Chaos:      payment-service pod-kill for 5 min     skip=${SKIP_CHAOS}"
+echo "  Chaos:      payment-service incident (latency + pod failure)  skip=${SKIP_CHAOS}"
 echo "  Chaos delay: ${CHAOS_DELAY_SEC}s after load begins"
 echo ""
 
@@ -178,7 +178,8 @@ if [ "$SKIP_CHAOS" = false ]; then
   # ─── Step 4: Start Chaos Studio experiment ──────────────────────
   echo "━━━ Step 4: Starting Chaos Studio experiment ━━━"
   echo "  Experiment: ${EXPERIMENT_NAME}"
-  echo "  Action:     Kill ALL payment-service pods (every ~60s for 5 min)"
+  echo "  Step 1:     Network latency injection (3s delay for 3 min)"
+  echo "  Step 2:     Pod failure / CrashLoopBackOff (5 min)"
   echo ""
 
   SUBSCRIPTION_ID=$(az account show --query id -o tsv)
@@ -222,7 +223,7 @@ if [ "$SKIP_CHAOS" = false ]; then
   fi
 
   # ─── Step 5: Monitor during chaos window ────────────────────────
-  echo "━━━ Step 5: Monitoring (chaos runs for ~5 minutes) ━━━"
+  echo "━━━ Step 5: Monitoring (chaos runs for ~8 minutes: 3m latency + 5m pod-failure) ━━━"
   echo ""
   echo "  ┌─────────────────────────────────────────────────────────┐"
   echo "  │  DEMO TIP: Switch to SRE Agent and ask:                │"
@@ -238,7 +239,7 @@ if [ "$SKIP_CHAOS" = false ]; then
   echo "  └─────────────────────────────────────────────────────────┘"
   echo ""
 
-  CHAOS_DURATION=300  # 5 minutes
+  CHAOS_DURATION=480  # 8 minutes (3m latency + 5m pod-failure)
   MONITOR_INTERVAL=30
   ELAPSED=0
 
@@ -290,7 +291,7 @@ if [ "$SKIP_CHAOS" = false ]; then
   done
 
   echo ""
-  echo "  ✓ Chaos window complete (5 min)"
+  echo "  ✓ Chaos window complete (8 min)"
   echo ""
 else
   echo "━━━ Step 3-5: Skipped (--load-only) ━━━"

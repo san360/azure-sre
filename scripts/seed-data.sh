@@ -216,30 +216,38 @@ for i in $(seq 1 "$NUM_RESTAURANTS"); do
       NUM_ITEMS="${#ALL_ITEMS[@]}"
     fi
 
-    # Shuffle and pick
-    SHUFFLED_ITEMS=($(shuf -e "${ALL_ITEMS[@]}" | head -n "$NUM_ITEMS"))
+    # Shuffle and pick (use mapfile to avoid word splitting on item names with spaces)
+    mapfile -t SHUFFLED_ITEMS < <(shuf -e "${ALL_ITEMS[@]}" | head -n "$NUM_ITEMS")
 
     for item_data in "${SHUFFLED_ITEMS[@]}"; do
       IFS=':' read -r ITEM_NAME ITEM_PRICE ITEM_CAT <<< "$item_data"
+      # Skip malformed items (safety check)
+      if [ -z "$ITEM_NAME" ] || [ -z "$ITEM_PRICE" ] || [ -z "$ITEM_CAT" ]; then
+        continue
+      fi
       if [ "$FIRST_ITEM" = true ]; then
         FIRST_ITEM=false
       else
         MENU_ITEMS_JSON+=","
       fi
-      MENU_ITEMS_JSON+="{\"name\":\"${ITEM_NAME}\",\"price\":${ITEM_PRICE},\"category\":\"${ITEM_CAT}\",\"description\":\"Freshly prepared ${ITEM_NAME,,}\"}"
+      ITEM_DESC="Freshly prepared ${ITEM_NAME,,}"
+      MENU_ITEMS_JSON+="{\"name\":\"${ITEM_NAME}\",\"price\":${ITEM_PRICE},\"category\":\"${ITEM_CAT}\",\"description\":\"${ITEM_DESC}\"}"
     done
     MENU_ITEMS_JSON+="]"
 
     # Create menu for this restaurant
     MENU_ID="menu-load-${BATCH_TAG}-${i}"
-    curl -s -o /dev/null --max-time 10 \
+    MENU_HTTP=$(curl -s -w "%{http_code}" -o /dev/null --max-time 10 \
       -X POST "${MENU_API_URL}/menus" \
       -H "Content-Type: application/json" \
       -d "{
         \"id\": \"${MENU_ID}\",
         \"restaurantId\": \"${REST_ID}\",
         \"items\": ${MENU_ITEMS_JSON}
-      }" 2>/dev/null || true
+      }" 2>/dev/null || echo "000")
+    if [[ "$MENU_HTTP" != "201" ]]; then
+      echo "  WARN: Menu creation for ${REST_ID} returned HTTP ${MENU_HTTP}"
+    fi
   else
     RESTAURANT_ERRORS=$((RESTAURANT_ERRORS + 1))
   fi
