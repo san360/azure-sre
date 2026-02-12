@@ -11,6 +11,9 @@ export default function Checkout() {
   const [name, setName] = useState(() => localStorage.getItem('contoso-name') || '');
   const [email, setEmail] = useState(() => localStorage.getItem('contoso-email') || '');
   const [paymentMethod, setPaymentMethod] = useState('credit_card');
+  const [cardNumber, setCardNumber] = useState('4111 1111 1111 1111');
+  const [cardExpiry, setCardExpiry] = useState('12/28');
+  const [cardCvv, setCardCvv] = useState('123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,7 +128,7 @@ export default function Checkout() {
 
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
           <h2 className="font-semibold text-gray-900 mb-3">Payment</h2>
-          <div className="flex gap-4">
+          <div className="flex gap-4 mb-4">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="radio"
@@ -148,6 +151,47 @@ export default function Checkout() {
               />
               <span className="text-sm">Debit Card</span>
             </label>
+          </div>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm text-gray-600 mb-1">Card Number</label>
+              <input
+                type="text"
+                value={cardNumber}
+                onChange={e => setCardNumber(e.target.value)}
+                placeholder="4111 1111 1111 1111"
+                maxLength={19}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                required
+              />
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="block text-sm text-gray-600 mb-1">Expiry</label>
+                <input
+                  type="text"
+                  value={cardExpiry}
+                  onChange={e => setCardExpiry(e.target.value)}
+                  placeholder="MM/YY"
+                  maxLength={5}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                  required
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm text-gray-600 mb-1">CVV</label>
+                <input
+                  type="text"
+                  value={cardCvv}
+                  onChange={e => setCardCvv(e.target.value)}
+                  placeholder="123"
+                  maxLength={4}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                  required
+                />
+              </div>
+            </div>
+            <p className="text-xs text-gray-400">Demo mode — no real charges. Use any card number.</p>
           </div>
         </div>
 

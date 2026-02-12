@@ -27,29 +27,27 @@ echo "Resource Group: $RESOURCE_GROUP"
 echo "AKS Cluster:    $AKS_CLUSTER_NAME"
 echo ""
 
-# Use direct kubectl if the cluster has public access, otherwise fall back to command invoke
-if kubectl cluster-info &>/dev/null; then
-  run_kubectl() { eval "$1"; }
-  echo "  Using direct kubectl access."
-else
-  run_kubectl() {
-    az aks command invoke \
-      --resource-group "$RESOURCE_GROUP" \
-      --name "$AKS_CLUSTER_NAME" \
-      --command "$1" 2>&1
-  }
-  echo "  Using az aks command invoke (private cluster)."
-fi
-echo ""
+# ─── Step 1: Deploy K8s manifests & wait for LoadBalancer IPs ───────
+echo "[1/4] Deploying AKS manifests (namespace, order-api, payment-service)..."
 
-# ─── Step 1: Wait for LoadBalancer IPs ──────────────────────────────
-echo "[1/4] Waiting for AKS LoadBalancer external IPs..."
+# Get AKS credentials if not already configured
+az aks get-credentials \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$AKS_CLUSTER_NAME" \
+  --overwrite-existing --only-show-errors 2>/dev/null || true
+
+kubectl apply -f "$PROJECT_ROOT/manifests/namespace.yaml"
+kubectl apply -f "$PROJECT_ROOT/manifests/order-api.yaml"
+kubectl apply -f "$PROJECT_ROOT/manifests/payment-service.yaml"
+
+echo "  Manifests applied. Waiting for LoadBalancer external IPs..."
+
 ORDER_API_IP=""
 PAYMENT_SERVICE_IP=""
 
 for i in $(seq 1 30); do
-  ORDER_API_IP=$(run_kubectl "kubectl get svc order-api -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}'" 2>/dev/null | tr -d "'" || echo "")
-  PAYMENT_SERVICE_IP=$(run_kubectl "kubectl get svc payment-service -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}'" 2>/dev/null | tr -d "'" || echo "")
+  ORDER_API_IP=$(kubectl get svc order-api -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+  PAYMENT_SERVICE_IP=$(kubectl get svc payment-service -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
 
   if [ -n "$ORDER_API_IP" ] && [ -n "$PAYMENT_SERVICE_IP" ]; then
     break

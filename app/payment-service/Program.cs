@@ -56,10 +56,34 @@ app.UseSwagger();
 app.UseSwaggerUI();
 
 // --- Auto-create schema on startup ---
+// NOTE: EnsureCreated() is a no-op if the database already exists (e.g. order-api
+// created it first). We must explicitly create the Payments table if missing.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PaymentsDbContext>();
     db.Database.EnsureCreated();
+
+    // EnsureCreated won't add tables to an existing DB created by another DbContext.
+    // Fall back to raw SQL to guarantee the Payments table exists.
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            CREATE TABLE IF NOT EXISTS ""Payments"" (
+                ""Id""              uuid            NOT NULL PRIMARY KEY,
+                ""OrderId""         uuid            NOT NULL,
+                ""Amount""          decimal(18,2)   NOT NULL,
+                ""Status""          varchar(50)     NOT NULL DEFAULT 'pending',
+                ""PaymentMethod""   varchar(100)    NOT NULL DEFAULT '',
+                ""FailureReason""   varchar(500)    NULL,
+                ""ProcessedAt""     timestamp       NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ""IX_Payments_OrderId"" ON ""Payments"" (""OrderId"");
+        ");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Schema bootstrap warning: {ex.Message}");
+    }
 }
 
 // --- Health check endpoints ---

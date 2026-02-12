@@ -34,6 +34,10 @@ spec:
                 secretKeyRef:
                   name: contoso-meals-secrets
                   key: appinsights-connection-string
+            - name: PaymentService__BaseUrl
+              value: "http://payment-service.production.svc.cluster.local"
+            - name: MenuApi__BaseUrl
+              value: "http://menu-api.production.svc.cluster.local"
             - name: ASPNETCORE_ENVIRONMENT
               value: Production
           resources:

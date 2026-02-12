@@ -60,7 +60,7 @@ resource experiment 'Microsoft.Chaos/experiments@2024-01-01' = {
                 parameters: [
                   {
                     key: 'jsonSpec'
-                    value: '{"action":"pod-kill","mode":"one","selector":{"namespaces":["production"],"labelSelectors":{"app":"payment-service"}},"scheduler":{"cron":"*/1 * * * *"}}'
+                    value: '{"action":"pod-kill","mode":"all","selector":{"namespaces":["production"],"labelSelectors":{"app":"payment-service"}},"scheduler":{"cron":"*/1 * * * *"}}'
                   }
                 ]
               }
