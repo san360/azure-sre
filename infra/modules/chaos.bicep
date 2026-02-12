@@ -24,9 +24,17 @@ resource podChaosCap 'Microsoft.Chaos/targets/capabilities@2024-01-01' = {
   name: 'PodChaos-2.2'
 }
 
-// Experiment: Kill payment-service pods
+// Capability: Network Chaos (required for latency injection)
+resource networkChaosCap 'Microsoft.Chaos/targets/capabilities@2024-01-01' = {
+  parent: chaosTarget
+  name: 'NetworkChaos-2.2'
+}
+
+// Experiment: Multi-step payment-service incident simulation
+// Step 1: Network latency injection (triggers P95 latency alerts)
+// Step 2: Pod failure / CrashLoopBackOff (triggers pod restart alerts)
 resource experiment 'Microsoft.Chaos/experiments@2024-01-01' = {
-  name: 'exp-${prefix}-pod-kill'
+  name: 'exp-${prefix}-payment-incident'
   location: resourceGroup().location
   tags: tags
   identity: {
@@ -47,10 +55,32 @@ resource experiment 'Microsoft.Chaos/experiments@2024-01-01' = {
     ]
     steps: [
       {
-        name: 'Kill payment-service pods'
+        name: 'Step 1 - Network latency degradation'
         branches: [
           {
-            name: 'branch1'
+            name: 'network-latency'
+            actions: [
+              {
+                type: 'continuous'
+                name: 'urn:csci:microsoft:azureKubernetesServiceChaosMesh:networkChaos/2.2'
+                selectorId: 'selector1'
+                duration: 'PT3M'
+                parameters: [
+                  {
+                    key: 'jsonSpec'
+                    value: '{"action":"delay","mode":"all","selector":{"namespaces":["production"],"labelSelectors":{"app":"payment-service"}},"delay":{"latency":"3000ms","jitter":"500ms","correlation":"50"},"direction":"to","duration":"180s"}'
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+      {
+        name: 'Step 2 - Pod failure (CrashLoopBackOff)'
+        branches: [
+          {
+            name: 'pod-failure'
             actions: [
               {
                 type: 'continuous'
@@ -60,7 +90,7 @@ resource experiment 'Microsoft.Chaos/experiments@2024-01-01' = {
                 parameters: [
                   {
                     key: 'jsonSpec'
-                    value: '{"action":"pod-kill","mode":"all","selector":{"namespaces":["production"],"labelSelectors":{"app":"payment-service"}},"scheduler":{"cron":"*/1 * * * *"}}'
+                    value: '{"action":"pod-failure","mode":"all","selector":{"namespaces":["production"],"labelSelectors":{"app":"payment-service"}},"duration":"120s"}'
                   }
                 ]
               }

@@ -467,7 +467,6 @@ module monitoring './modules/monitoring.bicep' = {
   scope: rg
   name: 'monitoring'
   params: {
-    aksResourceId: aks.outputs.resourceId
     logAnalyticsWorkspaceId: logAnalytics.outputs.resourceId
     prefix: prefix
     tags: tags
