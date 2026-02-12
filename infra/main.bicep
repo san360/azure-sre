@@ -536,6 +536,10 @@ output sreAgentIdentityClientId string = sreAgentIdentity.outputs.clientId
 output sreAgentIdentityPrincipalId string = sreAgentIdentity.outputs.principalId
 output sreAgentIdentityResourceId string = sreAgentIdentity.outputs.resourceId
 
+// SRE Agent resource outputs (when deployed via Bicep)
+output sreAgentId string = enableSreAgent ? sreAgent.outputs.agentId : ''
+output sreAgentPortalUrl string = enableSreAgent ? sreAgent.outputs.agentPortalUrl : ''
+
 // azd-convention outputs (used by azd for service deployment)
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer
 output AZURE_CONTAINER_REGISTRY_NAME string = 'acr${sanitizedPrefix}'
