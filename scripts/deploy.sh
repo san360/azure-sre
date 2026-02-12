@@ -51,9 +51,16 @@ SRE_MI_CLIENT_ID=$(az deployment sub show \
   --name "$(az deployment sub list --query "[?contains(name,'contoso-meals')].name | [0]" -o tsv)" \
   --query "properties.outputs.sreAgentIdentityClientId.value" -o tsv 2>/dev/null || echo "")
 
+SRE_AGENT_PORTAL_URL=$(az deployment sub show \
+  --name "$(az deployment sub list --query "[?contains(name,'contoso-meals')].name | [0]" -o tsv)" \
+  --query "properties.outputs.sreAgentPortalUrl.value" -o tsv 2>/dev/null || echo "")
+
 echo "  PostgreSQL FQDN:        $POSTGRES_FQDN"
 echo "  Menu API FQDN:          $MENU_API_FQDN"
 echo "  SRE Agent MI Client ID: $SRE_MI_CLIENT_ID"
+if [ -n "$SRE_AGENT_PORTAL_URL" ]; then
+  echo "  SRE Agent Portal URL:   $SRE_AGENT_PORTAL_URL"
+fi
 
 # Step 3: Get AKS credentials (AKS Automatic uses Entra ID RBAC)
 echo "[3/8] Getting AKS credentials..."

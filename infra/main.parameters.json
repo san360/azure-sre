@@ -17,6 +17,21 @@
     "enableJira": {
       "value": true
     },
+    "enableSreAgent": {
+      "value": true
+    },
+    "sreAgentAccessLevel": {
+      "value": "High"
+    },
+    "sreAgentMode": {
+      "value": "Review"
+    },
+    "targetResourceGroups": {
+      "value": []
+    },
+    "targetSubscriptions": {
+      "value": []
+    },
     "postgresLocation": {
       "value": "swedencentral"
     }
