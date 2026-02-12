@@ -154,12 +154,12 @@ module loadTest 'br/public:avm/res/load-test-service/load-test:0.4.0' = {
 ### Infrastructure (Bicep/AVM)
 
 ```
-Resource Group: rg-contoso-meals (East US 2)
+Resource Group: rg-contoso-meals (Sweden Central)
 │
 ├── Azure SRE Agent
 │   ├── Application Insights (auto-provisioned)
 │   ├── Log Analytics Workspace (auto-provisioned)
-│   ├── Managed Identity (auto-provisioned)
+│   ├── User-Assigned Managed Identity: id-contoso-meals-sre-agent (Reader on RG)
 │   ├── Connector: Azure MCP Server (42+ service tool groups)
 │   ├── Connector: Microsoft Teams
 │   ├── Connector: Outlook
@@ -306,7 +306,7 @@ Azure Monitor Alert fires
 
 Live in the Azure Portal:
 1. Search for **Azure SRE Agent** → Create
-2. Select subscription, resource group `rg-contoso-meals`, region `East US 2`
+2. Select subscription, resource group `rg-contoso-meals`, region `Sweden Central`
 3. Name: `contoso-meals-sre`
 4. Select managed resource groups (check `rg-contoso-meals`)
 5. Click **Create**
@@ -326,10 +326,13 @@ This is the **centerpiece moment** of the demo.
 | Connection Type | stdio |
 | Command | `npx` |
 | Arguments | `-y, @azure/mcp, server, start` |
-| Environment: AZURE_CLIENT_ID | *(Managed Identity client ID)* |
-| Environment: AZURE_TOKEN_CREDENTIALS | `managedidentitycredential` |
+| Managed Identity | `id-contoso-meals-sre-agent` *(select from dropdown)* |
+| Environment: AZURE_CLIENT_ID | *(Client ID of `id-contoso-meals-sre-agent` — see deployment output)* |
+| Environment: AZURE_TOKEN_CREDENTIALS | `ManagedIdentityCredential` |
 
-4. Save and verify connection.
+4. Save and verify connection shows **Connected** status.
+
+> **Important:** You must select the **user-assigned** managed identity `id-contoso-meals-sre-agent` from the dropdown. System-assigned managed identities are not supported for SRE Agent connectors. The `AZURE_CLIENT_ID` must match the client ID of the identity selected in the dropdown. Run `az identity show --name id-contoso-meals-sre-agent --resource-group rg-contoso-meals --query clientId -o tsv` to retrieve it.
 
 **Narrator:** *"With one connector, this agent now has access to 42+ Azure service tool groups — AKS cluster management, Cosmos DB queries, Storage operations, Policy checks, Resource Health, RBAC analysis, Key Vault secrets listing, and more. One connection. No custom code. No API wrappers."*
 
@@ -724,7 +727,7 @@ contoso-meals-sre/
 targetScope = 'subscription'
 
 @description('Deployment region')
-param location string = 'eastus2'
+param location string = 'swedencentral'
 
 @description('Environment prefix')
 param prefix string = 'contoso-meals'
@@ -1141,7 +1144,7 @@ resource experiment 'Microsoft.Chaos/experiments@2024-01-01' = {
 ```bash
 # Step 1: Deploy infrastructure
 az deployment sub create \
-  --location eastus2 \
+  --location swedencentral \
   --template-file infra/main.bicep \
   --parameters infra/main.parameters.json
 

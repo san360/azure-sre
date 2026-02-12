@@ -5,6 +5,7 @@ import RestaurantMenu from './pages/RestaurantMenu'
 import Checkout from './pages/Checkout'
 import OrderTracking from './pages/OrderTracking'
 import OrderHistory from './pages/OrderHistory'
+import Dashboard from './pages/Dashboard'
 
 export default function App() {
   const { totalItems } = useCart();
@@ -17,6 +18,9 @@ export default function App() {
             Contoso Meals
           </Link>
           <div className="flex items-center gap-4">
+            <Link to="/dashboard" className="text-sm text-gray-600 hover:text-gray-900">
+              Dashboard
+            </Link>
             <Link to="/orders" className="text-sm text-gray-600 hover:text-gray-900">
               My Orders
             </Link>
@@ -38,6 +42,7 @@ export default function App() {
           <Route path="/checkout" element={<Checkout />} />
           <Route path="/orders/:orderId" element={<OrderTracking />} />
           <Route path="/orders" element={<OrderHistory />} />
+          <Route path="/dashboard" element={<Dashboard />} />
         </Routes>
       </main>
     </div>

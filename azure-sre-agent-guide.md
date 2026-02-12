@@ -1,7 +1,7 @@
 # Azure SRE Agent: Comprehensive Guide for Demo & Customer Presentations
 
 > **Status:** Public Preview (no sign-up required)
-> **Region availability:** East US 2 (expanding)
+> **Region availability:** Sweden Central (expanding)
 > **Documentation last validated:** February 2026
 
 ---
@@ -163,6 +163,8 @@ When you create an Azure SRE Agent, these resources are automatically provisione
 - **Log Analytics Workspace**
 - **Managed Identity** (for RBAC-scoped access to your resources)
 
+> **Connector identity requirement:** SRE Agent connectors (MCP, Teams, Outlook) require a **user-assigned** managed identity. System-assigned managed identities are not fully functional for connectors. Provision a user-assigned MI and assign it Reader (or appropriate) role on the resource groups your agent monitors.
+
 ### Security Model
 
 - Uses **Managed Identity** with role-based access control.
@@ -278,7 +280,7 @@ Azure SRE Agent includes a persistent memory system with three components:
 ### 8.1 User Memories
 
 Quick chat commands for storing team knowledge:
-- `#remember Team owns app-service-prod in East US` — saves a fact
+- `#remember Team owns app-service-prod in Sweden Central` — saves a fact
 - `#forget` — removes a saved fact
 - `#retrieve` — searches saved items
 
@@ -388,8 +390,9 @@ Azure SRE Agent uses **Azure Agent Units (AAU)** for billing (effective Septembe
 
 **Steps:**
 1. Deploy the Azure MCP connector (Settings > Connectors, type: stdio, command: `npx -y @azure/mcp server start`).
-2. Configure Managed Identity with Reader access on target subscriptions.
-3. Create a subagent that uses the MCP connector.
+2. Select the **user-assigned** managed identity from the dropdown (must have Reader access on target subscriptions/resource groups).
+3. Set `AZURE_CLIENT_ID` to the identity's client ID and `AZURE_TOKEN_CREDENTIALS` to `ManagedIdentityCredential`.
+4. Create a subagent that uses the MCP connector.
 4. In the Playground, ask: *"List all resources across my subscriptions and identify any without tags."*
 
 **What to show:** MCP integration, cross-subscription visibility, Managed Identity security model.
@@ -426,7 +429,7 @@ Use the **community demo kit** ([jiratouchmhp/azure-sre-agent-demo](https://gith
 1. Open the Azure Portal → search for **Azure SRE Agent** (or navigate to [aka.ms/sreagent/portal](https://aka.ms/sreagent/portal))
 2. Select **Create**
 3. Choose your **Subscription** and **Resource Group**
-4. Enter an **Agent name** and select **East US 2** as the region
+4. Enter an **Agent name** and select **Sweden Central** as the region
 5. Under **Choose resource groups**, select the resource groups you want the agent to monitor
 6. Click **Create**
 
@@ -524,7 +527,7 @@ Additional videos cover topics like incident management with PagerDuty, IaC drif
 
 ### Before the Demo
 
-- [ ] **Region:** Deploy to **East US 2** (primary supported region).
+- [ ] **Region:** Deploy to **Sweden Central** (primary supported region).
 - [ ] **Firewall:** Allowlist `*.azuresre.ai`.
 - [ ] **Permissions:** Ensure RBAC Administrator or User Access Administrator permissions.
 - [ ] **Cost awareness:** Budget for 4 AAU/hour baseline + active task costs. Tear down demo resources after presenting.

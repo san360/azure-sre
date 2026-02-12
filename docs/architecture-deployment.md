@@ -63,15 +63,15 @@ The Contoso Meals platform is a cloud-native food ordering system deployed on Az
 
 | Resource | SKU/Tier | Region | Purpose |
 |----------|---------|--------|---------|
-| AKS Cluster | Automatic (Standard_DS4_v2) | East US 2 | Hosts order-api + payment-service |
-| Container App Environment | Consumption | East US 2 | Hosts menu-api, jira-sm, mcp-atlassian |
+| AKS Cluster | Automatic (Standard_DS4_v2) | Sweden Central | Hosts order-api + payment-service |
+| Container App Environment | Consumption | Sweden Central | Hosts menu-api, jira-sm, mcp-atlassian |
 | PostgreSQL Flexible Server | Standard_B1ms (Burstable) | Sweden Central | ordersdb + jiradb |
-| Cosmos DB | Serverless | Central US | catalogdb (restaurants, menus) |
-| Key Vault | Standard | East US 2 | Secrets management |
-| Log Analytics | Per-GB | East US 2 | Centralized logging |
-| Load Testing | Standard | East US 2 | Baseline + chaos load tests |
-| Storage Account | Standard_LRS | East US 2 | Jira home directory (Azure Files) |
-| Chaos Studio | N/A | East US 2 | Pod kill experiments |
+| Cosmos DB | Serverless | Sweden Central | catalogdb (restaurants, menus) |
+| Key Vault | Standard | Sweden Central | Secrets management |
+| Log Analytics | Per-GB | Sweden Central | Centralized logging |
+| Load Testing | Standard | Sweden Central | Baseline + chaos load tests |
+| Storage Account | Standard_LRS | Sweden Central | Jira home directory (Azure Files) |
+| Chaos Studio | N/A | Sweden Central | Pod kill experiments |
 
 ---
 
@@ -95,7 +95,7 @@ cd /path/to/azure-sre
 
 # Deploy all Azure infrastructure via Bicep
 az deployment sub create \
-  --location eastus2 \
+  --location swedencentral \
   --template-file infra/main.bicep \
   --parameters infra/main.parameters.json
 ```
@@ -192,7 +192,7 @@ Manual step in Azure Portal - see `demo-proposal.md` Part 1.
 
 ### PostgreSQL "LocationIsOfferRestricted" Error
 
-PostgreSQL is deployed to Sweden Central (not East US) because `eastus` has capacity restrictions for PostgreSQL Flexible Server. If Sweden Central also fails, try:
+All resources are deployed to Sweden Central. If Sweden Central has capacity issues for PostgreSQL Flexible Server, try:
 - `westeurope`
 - `northeurope`
 - `westus3`
@@ -225,6 +225,25 @@ Common issues:
 ```bash
 az containerapp logs show --name menu-api --resource-group rg-contoso-meals --tail 50
 ```
+
+### SRE Agent MCP Connector Shows "Disconnected"
+
+The Azure MCP connector requires a **user-assigned** managed identity. System-assigned identities are not supported for SRE Agent connectors.
+
+**Checklist:**
+1. **Identity exists:** `az identity show --name id-contoso-meals-sre-agent --resource-group rg-contoso-meals`
+2. **Client ID is correct:** The `AZURE_CLIENT_ID` env var must match the identity's client ID:
+   ```bash
+   az identity show --name id-contoso-meals-sre-agent --resource-group rg-contoso-meals --query clientId -o tsv
+   ```
+3. **Identity selected in dropdown:** In the connector config, you must select `id-contoso-meals-sre-agent` from the **Managed Identity** dropdown — setting the env var alone is not enough.
+4. **Reader role assigned:** The identity must have at least Reader on the resource group:
+   ```bash
+   az role assignment list --assignee $(az identity show --name id-contoso-meals-sre-agent -g rg-contoso-meals --query principalId -o tsv) --scope /subscriptions/<sub-id>/resourceGroups/rg-contoso-meals -o table
+   ```
+5. **`AZURE_TOKEN_CREDENTIALS`** must be set to exactly `ManagedIdentityCredential` (PascalCase, matching the .NET credential class name).
+6. **Arguments format:** Arguments must be comma-separated: `-y, @azure/mcp, server, start`
+7. **After fixing:** Delete and re-add the connector, then verify it shows **Connected**.
 
 ---
 

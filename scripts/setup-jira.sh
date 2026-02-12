@@ -125,27 +125,37 @@ PRIORITIES=$(curl -s "$JIRA_URL/rest/api/2/priority" \
   --max-time 10 2>/dev/null)
 echo "  Available priorities: $(echo "$PRIORITIES" | python3 -c "import sys,json; [print(t['name']) for t in json.load(sys.stdin)]" 2>/dev/null || echo "(unable to parse)")"
 
-# Generate API token info
+# Configure mcp-atlassian with Jira API token (admin password for Jira Server)
 echo ""
-echo "[5/5] API Token Configuration..."
-echo ""
-echo "  For Jira Server (non-cloud), API tokens are the admin password."
-echo "  Use these credentials for mcp-atlassian configuration:"
+echo "[5/5] Configuring mcp-atlassian with Jira API token..."
 echo ""
 echo "  JIRA_URL:       $JIRA_URL"
 echo "  JIRA_USERNAME:  $JIRA_ADMIN_USER"
-echo "  JIRA_API_TOKEN: <admin password>"
 echo ""
-echo "  To update the mcp-atlassian container app with the token:"
-echo "  az containerapp secret set \\"
-echo "    --name mcp-atlassian \\"
-echo "    --resource-group $RESOURCE_GROUP \\"
-echo "    --secrets jira-api-token=<admin-password>"
-echo ""
-echo "  Then restart the container:"
-echo "  az containerapp revision restart \\"
-echo "    --name mcp-atlassian \\"
-echo "    --resource-group $RESOURCE_GROUP"
+
+echo "  Updating mcp-atlassian secret..."
+az containerapp secret set \
+  --name mcp-atlassian \
+  --resource-group "$RESOURCE_GROUP" \
+  --secrets "jira-api-token=${JIRA_ADMIN_PASSWORD}" \
+  --only-show-errors 2>/dev/null || echo "  WARNING: Failed to set mcp-atlassian secret."
+
+echo "  Restarting mcp-atlassian..."
+ACTIVE_REVISION=$(az containerapp revision list \
+  --name mcp-atlassian \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "[?properties.active].name" -o tsv 2>/dev/null | head -1)
+
+if [ -n "$ACTIVE_REVISION" ]; then
+  az containerapp revision restart \
+    --name mcp-atlassian \
+    --resource-group "$RESOURCE_GROUP" \
+    --revision "$ACTIVE_REVISION" \
+    --only-show-errors 2>/dev/null || echo "  WARNING: Failed to restart mcp-atlassian revision."
+  echo "  mcp-atlassian restarted with updated Jira API token."
+else
+  echo "  WARNING: No active revision found for mcp-atlassian."
+fi
 
 echo ""
 echo "============================================="

@@ -13,7 +13,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 RESOURCE_GROUP="rg-contoso-meals"
 AKS_CLUSTER="aks-contoso-meals"
 PREFIX="contoso-meals"
-LOCATION="eastus2"
+LOCATION="swedencentral"
 POSTGRES_LOCATION="swedencentral"
 POSTGRES_ADMIN="contosoadmin"
 POSTGRES_PASSWORD="P@ssw0rd1234!"
@@ -44,8 +44,13 @@ MENU_API_FQDN=$(az deployment sub show \
   --name "$(az deployment sub list --query "[?contains(name,'contoso-meals')].name | [0]" -o tsv)" \
   --query "properties.outputs.menuApiFqdn.value" -o tsv)
 
-echo "  PostgreSQL FQDN: $POSTGRES_FQDN"
-echo "  Menu API FQDN:   $MENU_API_FQDN"
+SRE_MI_CLIENT_ID=$(az deployment sub show \
+  --name "$(az deployment sub list --query "[?contains(name,'contoso-meals')].name | [0]" -o tsv)" \
+  --query "properties.outputs.sreAgentIdentityClientId.value" -o tsv 2>/dev/null || echo "")
+
+echo "  PostgreSQL FQDN:        $POSTGRES_FQDN"
+echo "  Menu API FQDN:          $MENU_API_FQDN"
+echo "  SRE Agent MI Client ID: $SRE_MI_CLIENT_ID"
 
 # Step 3: Get AKS credentials (AKS Automatic uses Entra ID RBAC)
 echo "[3/8] Getting AKS credentials..."
@@ -99,6 +104,10 @@ if [ -n "$ACR_NAME" ]; then
     --image contoso-meals/payment-service:latest \
     "$PROJECT_ROOT/app/payment-service/"
 
+  az acr build --registry "$ACR_NAME" \
+    --image contoso-meals/web-ui:latest \
+    "$PROJECT_ROOT/app/web-ui/"
+
   # Update manifests with ACR name
   sed -i "s|\${ACR_NAME}|${ACR_NAME}|g" "$PROJECT_ROOT/manifests/order-api.yaml"
   sed -i "s|\${ACR_NAME}|${ACR_NAME}|g" "$PROJECT_ROOT/manifests/payment-service.yaml"
@@ -120,6 +129,16 @@ echo "  Waiting for deployments to be ready..."
 kubectl rollout status deployment/order-api -n production --timeout=120s || true
 kubectl rollout status deployment/payment-service -n production --timeout=120s || true
 
+# Step 7b: Update web-ui Container App with built image
+if [ -n "$ACR_NAME" ]; then
+  echo "  Updating web-ui Container App image..."
+  az containerapp update \
+    --name web-ui \
+    --resource-group "$RESOURCE_GROUP" \
+    --image "${ACR_NAME}.azurecr.io/contoso-meals/web-ui:latest" \
+    --only-show-errors 2>/dev/null || echo "  WARNING: Failed to update web-ui container app image."
+fi
+
 # Step 8: Verify deployment
 echo "[8/8] Verifying deployment..."
 echo ""
@@ -140,6 +159,11 @@ MCP_FQDN=$(az containerapp show \
   --resource-group "$RESOURCE_GROUP" \
   --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || echo "")
 
+WEBUI_FQDN=$(az containerapp show \
+  --name web-ui \
+  --resource-group "$RESOURCE_GROUP" \
+  --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || echo "")
+
 echo "============================================="
 echo "  Deployment Complete!"
 echo "============================================="
@@ -149,9 +173,16 @@ echo "  Resource Group:  $RESOURCE_GROUP"
 echo "  AKS Cluster:     $AKS_CLUSTER"
 echo "  PostgreSQL:      $POSTGRES_FQDN"
 echo "  Menu API:        https://$MENU_API_FQDN"
+[ -n "$WEBUI_FQDN" ] && echo "  Web UI:          https://$WEBUI_FQDN"
 [ -n "$JIRA_FQDN" ] && echo "  Jira SM:         https://$JIRA_FQDN"
 [ -n "$MCP_FQDN" ] && echo "  MCP Atlassian:   https://$MCP_FQDN/mcp"
 echo ""
+if [ -n "$SRE_MI_CLIENT_ID" ]; then
+  echo "SRE Agent MCP Connector:"
+  echo "  Identity:        id-contoso-meals-sre-agent"
+  echo "  AZURE_CLIENT_ID: $SRE_MI_CLIENT_ID"
+  echo ""
+fi
 echo "Next steps:"
 echo "  1. Run baseline load test:  ./scripts/generate-load.sh 30"
 echo "  2. Set up Jira:             ./scripts/setup-jira.sh"

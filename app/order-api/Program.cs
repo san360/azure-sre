@@ -94,13 +94,20 @@ using (var scope = app.Services.CreateScope())
 
     if (!db.Customers.Any())
     {
-        db.Customers.Add(new Customer
+        var seedCustomers = new[]
         {
-            Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
-            Name = "Default Customer",
-            Email = "default@contosomeals.com",
-            CreatedAt = DateTime.UtcNow
-        });
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000001"), Name = "Default Customer", Email = "default@contosomeals.com", CreatedAt = DateTime.UtcNow },
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000002"), Name = "Alice Johnson", Email = "alice.johnson@contosomeals.com", CreatedAt = DateTime.UtcNow },
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000003"), Name = "Bob Martinez", Email = "bob.martinez@contosomeals.com", CreatedAt = DateTime.UtcNow },
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000004"), Name = "Carlos Garcia", Email = "carlos.garcia@contosomeals.com", CreatedAt = DateTime.UtcNow },
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000005"), Name = "Diana Williams", Email = "diana.williams@contosomeals.com", CreatedAt = DateTime.UtcNow },
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000006"), Name = "Emma Davis", Email = "emma.davis@contosomeals.com", CreatedAt = DateTime.UtcNow },
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000007"), Name = "Frank Brown", Email = "frank.brown@contosomeals.com", CreatedAt = DateTime.UtcNow },
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000008"), Name = "Grace Lee", Email = "grace.lee@contosomeals.com", CreatedAt = DateTime.UtcNow },
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000009"), Name = "Hiro Tanaka", Email = "hiro.tanaka@contosomeals.com", CreatedAt = DateTime.UtcNow },
+            new Customer { Id = Guid.Parse("00000000-0000-0000-0000-000000000010"), Name = "Isla Rodriguez", Email = "isla.rodriguez@contosomeals.com", CreatedAt = DateTime.UtcNow }
+        };
+        db.Customers.AddRange(seedCustomers);
         db.SaveChanges();
     }
 }

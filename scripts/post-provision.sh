@@ -102,6 +102,26 @@ else
   echo "  WARNING: Cosmos DB connection string not found. menu-api may not connect to data store."
 fi
 
+# Step 4b: Configure web-ui Container App with backend API URLs
+echo "[4b/5] Configuring web-ui Container App with backend API URLs..."
+MENU_API_FQDN=$(az containerapp show \
+  --name menu-api \
+  --resource-group "$RESOURCE_GROUP" \
+  --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || echo "")
+
+if [ -n "$MENU_API_FQDN" ]; then
+  az containerapp update \
+    --name web-ui \
+    --resource-group "$RESOURCE_GROUP" \
+    --set-env-vars \
+      "MENU_API_URL=https://${MENU_API_FQDN}" \
+      "APPLICATIONINSIGHTS_CONNECTION_STRING=$APPINSIGHTS_CS" \
+    --only-show-errors 2>/dev/null || echo "  WARNING: Failed to update web-ui env vars."
+  echo "  web-ui environment variables configured."
+else
+  echo "  WARNING: menu-api FQDN not found. web-ui proxy may not connect to menu-api."
+fi
+
 # Step 5: Store connection strings in azd env for reference
 echo "[5/5] Storing connection strings in azd environment..."
 azd env set APPLICATIONINSIGHTS_CONNECTION_STRING "$APPINSIGHTS_CS" 2>/dev/null || true
@@ -115,3 +135,24 @@ echo ""
 echo "AKS namespace 'production' created with secrets."
 echo "ACR '$ACR_NAME' attached to AKS '$AKS_CLUSTER_NAME'."
 echo ""
+
+# Print SRE Agent identity info for MCP connector setup
+SRE_MI_CLIENT_ID=$(az identity show \
+  --name "id-contoso-meals-sre-agent" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query clientId -o tsv 2>/dev/null || echo "")
+
+if [ -n "$SRE_MI_CLIENT_ID" ]; then
+  echo "============================================="
+  echo "  SRE Agent MCP Connector Configuration"
+  echo "============================================="
+  echo ""
+  echo "  Use these values when configuring the Azure MCP connector"
+  echo "  in the SRE Agent portal (Settings → Connectors):"
+  echo ""
+  echo "  Managed Identity:  id-contoso-meals-sre-agent (select from dropdown)"
+  echo "  AZURE_CLIENT_ID:   $SRE_MI_CLIENT_ID"
+  echo "  AZURE_TOKEN_CREDENTIALS: ManagedIdentityCredential"
+  echo ""
+  azd env set SRE_AGENT_MI_CLIENT_ID "$SRE_MI_CLIENT_ID" 2>/dev/null || true
+fi

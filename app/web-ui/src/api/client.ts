@@ -73,6 +73,10 @@ export async function cancelOrder(id: string): Promise<{ id: string; status: str
 }
 
 // --- Customers ---
+export async function getCustomers(): Promise<Customer[]> {
+  return fetchJson<Customer[]>(`${ORDER_API}/customers`);
+}
+
 export async function getCustomer(id: string): Promise<Customer> {
   return fetchJson<Customer>(`${ORDER_API}/customers/${id}`);
 }

@@ -1,7 +1,7 @@
 targetScope = 'subscription'
 
 @description('Deployment region')
-param location string = 'eastus2'
+param location string = 'swedencentral'
 
 @description('Environment prefix')
 param prefix string = 'contoso-meals'
@@ -15,11 +15,12 @@ param enableLoadTesting bool = true
 @description('Enable Jira Service Management deployment')
 param enableJira bool = true
 
-@description('PostgreSQL deployment region (eastus is restricted - use swedencentral)')
+@description('PostgreSQL deployment region')
 param postgresLocation string = 'swedencentral'
 
-// Tags applied to ALL resources — SecurityControl=Ignore for demo environments
+// Tags applied to ALL resources — CostControl=Ignore, SecurityControl=Ignore for demo environments
 var tags = {
+  CostControl: 'Ignore'
   SecurityControl: 'Ignore'
   Environment: 'demo'
   Project: prefix
@@ -51,7 +52,7 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.11.0' = {
   scope: rg
   name: 'key-vault'
   params: {
-    name: 'kv-${sanitizedPrefix}'
+    name: 'kv-${sanitizedPrefix}sc'
     location: location
     enableRbacAuthorization: true
     tags: tags
@@ -111,7 +112,8 @@ module aks 'br/public:avm/res/container-service/managed-cluster:0.12.0' = {
   }
 }
 
-// Container App Environment — hosts menu-api, jira-sm, mcp-atlassian (AVM)
+// Container App Environment — hosts menu-api, web-ui, jira-sm, mcp-atlassian (AVM)
+// Uses workload profiles to support higher CPU/memory for JIRA
 module containerAppEnv 'br/public:avm/res/app/managed-environment:0.8.1' = {
   scope: rg
   name: 'container-app-env'
@@ -120,6 +122,18 @@ module containerAppEnv 'br/public:avm/res/app/managed-environment:0.8.1' = {
     location: location
     logAnalyticsWorkspaceResourceId: logAnalytics.outputs.resourceId
     zoneRedundant: false
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+      {
+        name: 'Dedicated-D4'
+        workloadProfileType: 'D4'
+        minimumCount: 1
+        maximumCount: 1
+      }
+    ]
     tags: tags
   }
 }
@@ -151,7 +165,43 @@ module menuApi 'br/public:avm/res/app/container-app:0.12.0' = {
     }
     ingressTargetPort: 8080
     ingressExternal: true
+    scaleMinReplicas: 2
+    scaleMaxReplicas: 5
     tags: union(tags, { 'azd-service-name': 'menu-api' })
+  }
+}
+
+// web-ui Container App — React frontend served via Nginx (AVM)
+// NOTE: Backend API URLs are injected post-provision via az containerapp update
+module webUi 'br/public:avm/res/app/container-app:0.12.0' = {
+  scope: rg
+  name: 'web-ui'
+  params: {
+    name: 'web-ui'
+    environmentResourceId: containerAppEnv.outputs.resourceId
+    containers: [
+      {
+        name: 'web-ui'
+        image: 'mcr.microsoft.com/dotnet/samples:aspnetapp'
+        resources: {
+          cpu: json('0.5')
+          memory: '1Gi'
+        }
+        env: [
+          { name: 'MENU_API_URL', value: 'http://menu-api' }
+          { name: 'ORDER_API_URL', value: 'http://order-api:8080' }
+          { name: 'PAYMENT_API_URL', value: 'http://payment-service:8080' }
+        ]
+      }
+    ]
+    managedIdentities: {
+      systemAssigned: true
+    }
+    ingressTargetPort: 8080
+    ingressExternal: true
+    scaleMinReplicas: 2
+    scaleMaxReplicas: 5
+    tags: union(tags, { 'azd-service-name': 'web-ui' })
   }
 }
 
@@ -176,8 +226,13 @@ module cosmosdb 'br/public:avm/res/document-db/database-account:0.11.0' = {
   name: 'cosmosdb'
   params: {
     name: 'cosmos-${prefix}'
-    location: 'centralus' // Using centralus due to Cosmos DB capacity constraints in eastus2/westus2
+    location: location
     enableFreeTier: false
+    disableLocalAuth: false
+    networkRestrictions: {
+      publicNetworkAccess: 'Enabled'
+      ipRules: []
+    }
     capabilitiesToAdd: [
       'EnableServerless'
     ]
@@ -202,6 +257,32 @@ module cosmosdb 'br/public:avm/res/document-db/database-account:0.11.0' = {
       }
     ]
     tags: tags
+  }
+}
+
+// User-Assigned Managed Identity for Azure SRE Agent MCP Connector
+// Required: SRE Agent connectors only support user-assigned MI (system-assigned is not fully functional).
+// This identity is selected in the SRE Agent portal's connector dropdown and its client ID is
+// passed as the AZURE_CLIENT_ID environment variable to the Azure MCP server.
+module sreAgentIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.0' = {
+  scope: rg
+  name: 'sre-agent-identity'
+  params: {
+    name: 'id-${prefix}-sre-agent'
+    location: location
+    tags: tags
+  }
+}
+
+// Role Assignment: Grant the SRE Agent identity Reader access on the resource group
+// This allows the Azure MCP server to list and query resources within rg-contoso-meals.
+// Scoped to the resource group (least-privilege) per Microsoft security best practices.
+// Reader built-in role definition ID: acdd72a7-3385-48ef-bd42-f606fba81ae7
+module sreAgentRoleAssignment 'modules/sre-agent-role.bicep' = {
+  scope: rg
+  name: 'sre-agent-role-reader'
+  params: {
+    principalId: sreAgentIdentity.outputs.principalId
   }
 }
 
@@ -246,13 +327,14 @@ module storageAccount 'br/public:avm/res/storage/storage-account:0.14.0' = if (e
   }
 }
 
-// Jira Service Management Container App (AVM)
+// Jira Service Management Container App (AVM) — runs on dedicated D4 workload profile for performance
 module jiraSm 'br/public:avm/res/app/container-app:0.12.0' = if (enableJira) {
   scope: rg
   name: 'jira-sm'
   params: {
     name: 'jira-sm'
     environmentResourceId: containerAppEnv.outputs.resourceId
+    workloadProfileName: 'Dedicated-D4'
     secrets: {
       secureList: [
         {
@@ -266,8 +348,8 @@ module jiraSm 'br/public:avm/res/app/container-app:0.12.0' = if (enableJira) {
         name: 'jira'
         image: 'atlassian/jira-servicemanagement:10.0'
         resources: {
-          cpu: json('2')
-          memory: '4Gi'
+          cpu: json('4')
+          memory: '8Gi'
         }
         env: [
           // JDBC URL must reference the PostgreSQL FQDN with SSL enabled
@@ -277,8 +359,8 @@ module jiraSm 'br/public:avm/res/app/container-app:0.12.0' = if (enableJira) {
           { name: 'ATL_JDBC_PASSWORD', secretRef: 'jira-db-password' }
           { name: 'ATL_DB_DRIVER', value: 'org.postgresql.Driver' }
           { name: 'ATL_DB_TYPE', value: 'postgres72' }
-          { name: 'JVM_MINIMUM_MEMORY', value: '1024m' }
-          { name: 'JVM_MAXIMUM_MEMORY', value: '2048m' }
+          { name: 'JVM_MINIMUM_MEMORY', value: '2048m' }
+          { name: 'JVM_MAXIMUM_MEMORY', value: '6144m' }
           // Proxy settings for Container Apps ingress
           { name: 'ATL_PROXY_NAME', value: 'jira-sm.${containerAppEnv.outputs.defaultDomain}' }
           { name: 'ATL_PROXY_PORT', value: '443' }
@@ -289,6 +371,8 @@ module jiraSm 'br/public:avm/res/app/container-app:0.12.0' = if (enableJira) {
     ]
     ingressTargetPort: 8080
     ingressExternal: true
+    scaleMinReplicas: 1
+    scaleMaxReplicas: 1
     managedIdentities: {
       systemAssigned: true
     }
@@ -335,6 +419,8 @@ module mcpAtlassian 'br/public:avm/res/app/container-app:0.12.0' = if (enableJir
     ]
     ingressTargetPort: 9000
     ingressExternal: true
+    scaleMinReplicas: 2
+    scaleMaxReplicas: 5
     managedIdentities: {
       systemAssigned: true
     }
@@ -381,6 +467,7 @@ module chaos './modules/chaos.bicep' = if (enableChaos) {
 output resourceGroupName string = rg.name
 output aksClusterName string = aks.outputs.name
 output menuApiFqdn string = menuApi.outputs.fqdn
+output webUiFqdn string = webUi.outputs.fqdn
 output postgresServerName string = postgres.outputs.name
 output postgresServerFqdn string = postgres.outputs.fqdn
 output cosmosDbAccountName string = cosmosdb.outputs.name
@@ -388,6 +475,12 @@ output logAnalyticsWorkspaceId string = logAnalytics.outputs.resourceId
 output containerAppEnvDefaultDomain string = containerAppEnv.outputs.defaultDomain
 output jiraSmFqdn string = enableJira ? jiraSm.outputs.fqdn : ''
 output mcpAtlassianFqdn string = enableJira ? mcpAtlassian.outputs.fqdn : ''
+
+// SRE Agent identity outputs — use these when configuring the Azure MCP connector
+output sreAgentIdentityName string = sreAgentIdentity.outputs.name
+output sreAgentIdentityClientId string = sreAgentIdentity.outputs.clientId
+output sreAgentIdentityPrincipalId string = sreAgentIdentity.outputs.principalId
+output sreAgentIdentityResourceId string = sreAgentIdentity.outputs.resourceId
 
 // azd-convention outputs (used by azd for service deployment)
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer

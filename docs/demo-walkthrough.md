@@ -15,11 +15,13 @@ cd /path/to/azure-sre
 
 ### T-24h: Configure SRE Agent
 1. Azure Portal → Search "Azure SRE Agent" → Create
-2. RG: `rg-contoso-meals`, Region: East US 2, Name: `contoso-meals-sre`
+2. RG: `rg-contoso-meals`, Region: Sweden Central, Name: `contoso-meals-sre`
 3. Select managed resource group: `rg-contoso-meals`
 4. Settings → Connectors → Add Custom MCP Server:
    - Type: stdio, Command: `npx`, Args: `-y, @azure/mcp, server, start`
-   - Env: `AZURE_CLIENT_ID=<managed-identity-id>`, `AZURE_TOKEN_CREDENTIALS=managedidentitycredential`
+   - Managed Identity: select `id-contoso-meals-sre-agent` from dropdown
+   - Env: `AZURE_CLIENT_ID=<client-id-from-deployment-output>`, `AZURE_TOKEN_CREDENTIALS=ManagedIdentityCredential`
+   - **Note:** Must use the **user-assigned** MI — system-assigned is not supported for connectors
 5. Settings → Connectors → Add Microsoft Teams → OAuth → Select channel
 6. Settings → Knowledge Base → Upload `knowledge/contoso-meals-runbook.md`
 
