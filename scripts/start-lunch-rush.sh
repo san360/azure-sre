@@ -208,14 +208,34 @@ if [ "$SKIP_CHAOS" = false ]; then
   CHAOS_DETAIL=$(az rest \
     --method get \
     --url "https://management.azure.com${EXPERIMENT_ID}?api-version=2024-01-01" \
-    --query "{name:name, status:properties.provisioningState, steps:properties.steps[0].branches[0].actions[0].parameters[0].value}" \
     -o json 2>/dev/null || echo '{}')
+
+  # Extract summary info with jq, falling back gracefully
+  CHAOS_SUMMARY=$(echo "$CHAOS_DETAIL" | jq '{
+    name: .name,
+    provisioningState: .properties.provisioningState,
+    steps: [.properties.steps[]? | {
+      name: .name,
+      branches: [.branches[]? | {
+        name: .name,
+        actions: [.actions[]? | {
+          type: .type,
+          name: .name,
+          duration: .duration,
+          selectorId: .selectorId
+        }]
+      }]
+    }]
+  }' 2>/dev/null || echo '{}')
+
   echo "  Experiment JSON:"
-  echo "$CHAOS_DETAIL" | jq '.' 2>/dev/null | sed 's/^/    /' || echo "    (could not parse)"
+  echo "$CHAOS_SUMMARY" | jq '.' 2>/dev/null | sed 's/^/    /' || echo "    (could not parse experiment details)"
   echo ""
 
-  # Show the Chaos Mesh jsonSpec clearly
-  JSONSPEC=$(echo "$CHAOS_DETAIL" | jq -r '.steps // empty' 2>/dev/null || echo '')
+  # Show Chaos Mesh jsonSpec if present in any action parameters
+  JSONSPEC=$(echo "$CHAOS_DETAIL" | jq -r '
+    [.properties.steps[]?.branches[]?.actions[]?.parameters[]? | select(.key == "jsonSpec") | .value] | first // empty
+  ' 2>/dev/null || echo '')
   if [ -n "$JSONSPEC" ]; then
     echo "  Chaos Mesh spec:"
     echo "$JSONSPEC" | jq '.' 2>/dev/null | sed 's/^/    /' || echo "    $JSONSPEC"

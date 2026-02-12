@@ -585,8 +585,10 @@ Live in the Azure Portal:
 | Name | Jira Service Management |
 | Connection Type | HTTP (streamable) |
 | Endpoint URL | `https://<mcp-atlassian-fqdn>/mcp` |
-| Authentication | API Token |
-| Headers | `Authorization: Bearer <jira-api-token>` |
+| Authentication | Custom headers |
+| Headers | `Authorization: Token <jira-api-token>` |
+
+> **Important:** Use the `Token` prefix (not `Bearer`). The mcp-atlassian middleware interprets `Bearer` as OAuth (requiring a full OAuth config), while `Token` is treated as a Personal Access Token (PAT) which works with the server's existing basic auth credentials.
 
 4. Save and verify connection — the agent discovers 34 Jira tools
 

@@ -30,7 +30,8 @@ cd /path/to/azure-sre
 ./scripts/setup-jira.sh
 ```
 Then configure mcp-atlassian connector in SRE Agent:
-- Type: HTTP, URL: `https://<mcp-atlassian-fqdn>/mcp`, Auth: API Token
+- Type: HTTP, URL: `https://<mcp-atlassian-fqdn>/mcp`, Auth: Custom headers
+- Header: `Authorization: Token <jira-api-token>` (use `Token` prefix, not `Bearer`)
 
 ### T-2h: Verify Everything
 ```bash
