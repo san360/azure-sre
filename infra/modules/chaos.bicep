@@ -7,26 +7,15 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2024-09-01' exis
   name: aksClusterName
 }
 
-// Install Chaos Mesh on AKS via Kubernetes extension
-// This deploys Chaos Mesh into the 'chaos-testing' namespace on the cluster
-resource chaosMeshExtension 'Microsoft.KubernetesConfiguration/extensions@2023-05-01' = {
-  name: 'chaos-mesh'
-  scope: aksCluster
-  properties: {
-    extensionType: 'Microsoft.Chaos'
-    autoUpgradeMinorVersion: true
-    releaseTrain: 'Stable'
-  }
-}
+// NOTE: Chaos Mesh is installed via Helm in post-provision.sh because the
+// Microsoft.KubernetesConfiguration/extensions 'Microsoft.Chaos' extension type
+// is not supported in all regions (e.g. swedencentral).
 
 // Chaos Studio Target for AKS
 resource chaosTarget 'Microsoft.Chaos/targets@2024-01-01' = {
   name: 'Microsoft-AzureKubernetesServiceChaosMesh'
   scope: aksCluster
   properties: {}
-  dependsOn: [
-    chaosMeshExtension
-  ]
 }
 
 // Capability: Pod Chaos

@@ -321,6 +321,19 @@ module loadTest 'br/public:avm/res/load-test-service/load-test:0.4.0' = if (enab
   }
 }
 
+// ACR → AKS pull role assignment (replaces az aks update --attach-acr in post-provision)
+module acrPullRole 'modules/acr-pull-role.bicep' = {
+  scope: rg
+  name: 'acr-aks-pull-role'
+  params: {
+    acrName: 'acr${sanitizedPrefix}'
+    aksClusterName: aks.outputs.name
+  }
+  dependsOn: [
+    acr
+  ]
+}
+
 // Storage Account for Jira home directory (AVM)
 module storageAccount 'br/public:avm/res/storage/storage-account:0.14.0' = if (enableJira) {
   scope: rg

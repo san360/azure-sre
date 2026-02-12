@@ -38,15 +38,9 @@ run_kubectl() {
     --command "$1" 2>&1
 }
 
-# Step 1: Attach ACR to AKS (allows AKS to pull images without imagePullSecrets)
-echo "[1/6] Attaching ACR to AKS..."
-az aks update \
-  --resource-group "$RESOURCE_GROUP" \
-  --name "$AKS_CLUSTER_NAME" \
-  --attach-acr "$ACR_NAME" \
-  --only-show-errors 2>/dev/null || echo "  WARNING: ACR attach failed (may require Owner role or already attached)"
+# NOTE: ACR-to-AKS attachment is now handled in Bicep (modules/acr-pull-role.bicep)
 
-# Step 1b: Configure ACR authentication for Container Apps
+# Step 1: Configure ACR authentication for Container Apps
 # Container Apps need registry credentials to pull images pushed by azd deploy
 echo "[1b/6] Configuring ACR registry on Container Apps..."
 ACR_SERVER="${ACR_NAME}.azurecr.io"
@@ -181,6 +175,27 @@ fi
 echo "[5/6] Storing connection strings in azd environment..."
 azd env set APPLICATIONINSIGHTS_CONNECTION_STRING "$APPINSIGHTS_CS" 2>/dev/null || true
 azd env set COSMOS_CONNECTION_STRING "${COSMOS_CS:-}" 2>/dev/null || true
+
+# Step 6: Install Chaos Mesh on AKS via Helm
+# The Microsoft.KubernetesConfiguration extension type 'Microsoft.Chaos' is not available
+# in all regions (e.g. swedencentral), so we install Chaos Mesh directly via Helm.
+echo "[6/6] Installing Chaos Mesh on AKS..."
+if command -v helm &>/dev/null; then
+  az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$AKS_CLUSTER_NAME" --overwrite-existing --only-show-errors 2>/dev/null
+  helm repo add chaos-mesh https://charts.chaos-mesh.org 2>/dev/null || true
+  helm repo update chaos-mesh 2>/dev/null || true
+  helm upgrade --install chaos-mesh chaos-mesh/chaos-mesh \
+    --namespace chaos-testing \
+    --create-namespace \
+    --set chaosDaemon.runtime=containerd \
+    --set chaosDaemon.socketPath=/run/containerd/containerd.sock \
+    --wait --timeout 5m 2>&1 || echo "  WARNING: Chaos Mesh Helm install had issues (may already be installed)"
+  echo "  Chaos Mesh installed in 'chaos-testing' namespace."
+else
+  echo "  WARNING: helm not found. Install Chaos Mesh manually:"
+  echo "    helm repo add chaos-mesh https://charts.chaos-mesh.org"
+  echo "    helm install chaos-mesh chaos-mesh/chaos-mesh -n chaos-testing --create-namespace --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock"
+fi
 
 echo ""
 echo "============================================="
