@@ -69,7 +69,7 @@ metadata:
     app: order-api
     app.kubernetes.io/part-of: contoso-meals
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: order-api
   ports:

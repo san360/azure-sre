@@ -246,6 +246,69 @@ echo "  ✓ Restaurants created: ${#RESTAURANT_IDS[@]}/${NUM_RESTAURANTS}"
 echo ""
 
 #######################################################################
+# Seed Orders (using created customers and restaurants)
+#######################################################################
+NUM_ORDERS=10
+echo "--- Seeding ${NUM_ORDERS} orders ---"
+ORDER_IDS=()
+ORDER_ERRORS=0
+
+ORDER_ITEMS_POOL=(
+  '[{"name":"Classic Burger","price":12.99},{"name":"Truffle Fries","price":7.99}]|20.98'
+  '[{"name":"Dragon Roll","price":16.99},{"name":"Miso Soup","price":4.99}]|21.98'
+  '[{"name":"Margherita Pizza","price":13.99},{"name":"Caesar Salad","price":9.99}]|23.98'
+  '[{"name":"Carne Asada Taco","price":4.99},{"name":"Al Pastor Taco","price":4.49},{"name":"Guacamole & Chips","price":8.99}]|18.47'
+  '[{"name":"Pad Thai","price":14.99},{"name":"Thai Iced Tea","price":4.99}]|19.98'
+  '[{"name":"Butter Chicken","price":16.99},{"name":"Naan Bread","price":3.99}]|20.98'
+  '[{"name":"Bibimbap","price":14.99}]|14.99'
+  '[{"name":"Pho Bo","price":14.99},{"name":"Spring Rolls","price":6.99}]|21.98'
+  '[{"name":"Ribeye Steak","price":34.99},{"name":"Wedge Salad","price":9.99}]|44.98'
+  '[{"name":"Falafel Wrap","price":11.99},{"name":"Hummus & Pita","price":8.99}]|20.98'
+)
+PAYMENT_METHODS=("credit_card" "debit_card" "apple_pay" "google_pay")
+
+# Build combined customer + restaurant pools (seeded + originals)
+ALL_CUST_IDS=("${CUSTOMER_IDS[@]}")
+ALL_REST_IDS=("${RESTAURANT_IDS[@]}")
+# Add original seed restaurant IDs
+ALL_REST_IDS+=("restaurant-1" "restaurant-2" "restaurant-3" "restaurant-4")
+
+for i in $(seq 1 "$NUM_ORDERS"); do
+  CUST_ID=$(random_element "${ALL_CUST_IDS[@]}")
+  REST_ID=$(random_element "${ALL_REST_IDS[@]}")
+  IDX=$((RANDOM % ${#ORDER_ITEMS_POOL[@]}))
+  ITEM_DATA="${ORDER_ITEMS_POOL[$IDX]}"
+  ITEMS="${ITEM_DATA%%|*}"
+  AMOUNT="${ITEM_DATA##*|}"
+  PAY_METHOD=$(random_element "${PAYMENT_METHODS[@]}")
+
+  RESPONSE=$(curl -s -w "\n%{http_code}" --max-time 10 \
+    -X POST "${ORDER_API_URL}/orders" \
+    -H "Content-Type: application/json" \
+    -d "{\"customerId\":\"${CUST_ID}\",\"restaurantId\":\"${REST_ID}\",\"items\":${ITEMS},\"totalAmount\":${AMOUNT},\"paymentMethod\":\"${PAY_METHOD}\"}" \
+    2>/dev/null || echo -e "\n000")
+
+  HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+  BODY=$(echo "$RESPONSE" | sed '$d')
+
+  if [[ "$HTTP_CODE" == "201" ]]; then
+    OID=$(echo "$BODY" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [ -n "$OID" ]; then
+      ORDER_IDS+=("$OID")
+    fi
+  else
+    ORDER_ERRORS=$((ORDER_ERRORS + 1))
+  fi
+
+  if [ $((i % 5)) -eq 0 ]; then
+    echo "  Created $i/${NUM_ORDERS} orders (${#ORDER_IDS[@]} ok, ${ORDER_ERRORS} errors)"
+  fi
+done
+
+echo "  ✓ Orders created: ${#ORDER_IDS[@]}/${NUM_ORDERS}"
+echo ""
+
+#######################################################################
 # Export IDs for load test consumption
 #######################################################################
 echo "--- Writing seed IDs to ${SEED_IDS_FILE} ---"
@@ -306,6 +369,7 @@ echo "  Data Seeding Complete"
 echo "============================================="
 echo "  Customers:    ${#CUSTOMER_IDS[@]} new + 1 default"
 echo "  Restaurants:  ${#RESTAURANT_IDS[@]} new + 4 seed"
+echo "  Orders:       ${#ORDER_IDS[@]} new"
 echo "  Batch Tag:    ${BATCH_TAG}"
 echo ""
 echo "  To use with load test:"

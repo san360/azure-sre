@@ -109,17 +109,38 @@ MENU_API_FQDN=$(az containerapp show \
   --resource-group "$RESOURCE_GROUP" \
   --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || echo "")
 
+# Fetch AKS LoadBalancer external IPs for order-api and payment-service
+ORDER_API_IP=$(run_kubectl "kubectl get svc order-api -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}'" 2>/dev/null | tr -d "'" || echo "")
+PAYMENT_SERVICE_IP=$(run_kubectl "kubectl get svc payment-service -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}'" 2>/dev/null | tr -d "'" || echo "")
+
+WEBUI_ENV_VARS=""
 if [ -n "$MENU_API_FQDN" ]; then
+  WEBUI_ENV_VARS="MENU_API_URL=https://${MENU_API_FQDN}"
+fi
+if [ -n "$ORDER_API_IP" ]; then
+  WEBUI_ENV_VARS="$WEBUI_ENV_VARS ORDER_API_URL=http://${ORDER_API_IP}"
+  echo "  Order API external IP: $ORDER_API_IP"
+else
+  echo "  WARNING: order-api external IP not available yet (services may not be deployed)."
+fi
+if [ -n "$PAYMENT_SERVICE_IP" ]; then
+  WEBUI_ENV_VARS="$WEBUI_ENV_VARS PAYMENT_API_URL=http://${PAYMENT_SERVICE_IP}"
+  echo "  Payment Service external IP: $PAYMENT_SERVICE_IP"
+else
+  echo "  WARNING: payment-service external IP not available yet (services may not be deployed)."
+fi
+
+if [ -n "$WEBUI_ENV_VARS" ]; then
   az containerapp update \
     --name web-ui \
     --resource-group "$RESOURCE_GROUP" \
     --set-env-vars \
-      "MENU_API_URL=https://${MENU_API_FQDN}" \
+      $WEBUI_ENV_VARS \
       "APPLICATIONINSIGHTS_CONNECTION_STRING=$APPINSIGHTS_CS" \
     --only-show-errors 2>/dev/null || echo "  WARNING: Failed to update web-ui env vars."
   echo "  web-ui environment variables configured."
 else
-  echo "  WARNING: menu-api FQDN not found. web-ui proxy may not connect to menu-api."
+  echo "  WARNING: No backend URLs available. web-ui proxy may not work."
 fi
 
 # Step 5: Store connection strings in azd env for reference

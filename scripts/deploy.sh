@@ -142,7 +142,39 @@ echo "  Waiting for deployments to be ready..."
 kubectl rollout status deployment/order-api -n production --timeout=120s || true
 kubectl rollout status deployment/payment-service -n production --timeout=120s || true
 
-# Step 7b: Update web-ui Container App with built image
+# Step 7b: Wait for LoadBalancer external IPs and configure web-ui backend URLs
+echo "[7b/8] Waiting for AKS LoadBalancer external IPs..."
+ORDER_API_IP=""
+PAYMENT_SERVICE_IP=""
+for i in $(seq 1 30); do
+  ORDER_API_IP=$(kubectl get svc order-api -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+  PAYMENT_SERVICE_IP=$(kubectl get svc payment-service -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+  if [ -n "$ORDER_API_IP" ] && [ -n "$PAYMENT_SERVICE_IP" ]; then
+    break
+  fi
+  echo "  Waiting for external IPs... (attempt $i/30)"
+  sleep 10
+done
+
+if [ -n "$ORDER_API_IP" ] && [ -n "$PAYMENT_SERVICE_IP" ]; then
+  echo "  Order API external IP:      $ORDER_API_IP"
+  echo "  Payment Service external IP: $PAYMENT_SERVICE_IP"
+  echo "  Updating web-ui Container App with AKS backend URLs..."
+  az containerapp update \
+    --name web-ui \
+    --resource-group "$RESOURCE_GROUP" \
+    --set-env-vars \
+      "ORDER_API_URL=http://${ORDER_API_IP}" \
+      "PAYMENT_API_URL=http://${PAYMENT_SERVICE_IP}" \
+    --only-show-errors 2>/dev/null || echo "  WARNING: Failed to update web-ui with AKS backend URLs."
+  echo "  web-ui backend URLs configured."
+else
+  echo "  WARNING: Could not retrieve AKS external IPs. web-ui may not connect to order-api/payment-service."
+  echo "  order-api IP: ${ORDER_API_IP:-not assigned}"
+  echo "  payment-service IP: ${PAYMENT_SERVICE_IP:-not assigned}"
+fi
+
+# Step 7c: Update web-ui Container App with built image
 if [ -n "$ACR_NAME" ]; then
   echo "  Updating web-ui Container App image..."
   az containerapp update \
@@ -186,6 +218,8 @@ echo "  Resource Group:  $RESOURCE_GROUP"
 echo "  AKS Cluster:     $AKS_CLUSTER"
 echo "  PostgreSQL:      $POSTGRES_FQDN"
 echo "  Menu API:        https://$MENU_API_FQDN"
+[ -n "${ORDER_API_IP:-}" ] && echo "  Order API:       http://$ORDER_API_IP"
+[ -n "${PAYMENT_SERVICE_IP:-}" ] && echo "  Payment Service: http://$PAYMENT_SERVICE_IP"
 [ -n "$WEBUI_FQDN" ] && echo "  Web UI:          https://$WEBUI_FQDN"
 [ -n "$JIRA_FQDN" ] && echo "  Jira SM:         https://$JIRA_FQDN"
 [ -n "$MCP_FQDN" ] && echo "  MCP Atlassian:   https://$MCP_FQDN/mcp"

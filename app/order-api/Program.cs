@@ -110,6 +110,25 @@ using (var scope = app.Services.CreateScope())
         db.Customers.AddRange(seedCustomers);
         db.SaveChanges();
     }
+
+    if (!db.Orders.Any())
+    {
+        var seedOrders = new[]
+        {
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000001"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000002"), RestaurantId = "restaurant-1", Status = "confirmed", TotalAmount = 27.97m, Items = "[{\"name\":\"Classic Burger\",\"price\":12.99},{\"name\":\"Truffle Fries\",\"price\":7.99},{\"name\":\"Milkshake\",\"price\":6.99}]", CreatedAt = DateTime.UtcNow.AddHours(-48), UpdatedAt = DateTime.UtcNow.AddHours(-48) },
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000002"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000003"), RestaurantId = "restaurant-2", Status = "confirmed", TotalAmount = 21.98m, Items = "[{\"name\":\"Dragon Roll\",\"price\":16.99},{\"name\":\"Miso Soup\",\"price\":4.99}]", CreatedAt = DateTime.UtcNow.AddHours(-36), UpdatedAt = DateTime.UtcNow.AddHours(-36) },
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000003"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000004"), RestaurantId = "restaurant-3", Status = "confirmed", TotalAmount = 23.98m, Items = "[{\"name\":\"Margherita Pizza\",\"price\":13.99},{\"name\":\"Caesar Salad\",\"price\":9.99}]", CreatedAt = DateTime.UtcNow.AddHours(-24), UpdatedAt = DateTime.UtcNow.AddHours(-24) },
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000004"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000005"), RestaurantId = "restaurant-4", Status = "pending", TotalAmount = 18.47m, Items = "[{\"name\":\"Carne Asada Taco\",\"price\":4.99},{\"name\":\"Al Pastor Taco\",\"price\":4.49},{\"name\":\"Guacamole & Chips\",\"price\":8.99}]", CreatedAt = DateTime.UtcNow.AddHours(-12), UpdatedAt = DateTime.UtcNow.AddHours(-12) },
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000005"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000006"), RestaurantId = "restaurant-5", Status = "confirmed", TotalAmount = 19.98m, Items = "[{\"name\":\"Pad Thai\",\"price\":14.99},{\"name\":\"Thai Iced Tea\",\"price\":4.99}]", CreatedAt = DateTime.UtcNow.AddHours(-8), UpdatedAt = DateTime.UtcNow.AddHours(-8) },
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000006"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000007"), RestaurantId = "restaurant-6", Status = "confirmed", TotalAmount = 20.98m, Items = "[{\"name\":\"Butter Chicken\",\"price\":16.99},{\"name\":\"Naan Bread\",\"price\":3.99}]", CreatedAt = DateTime.UtcNow.AddHours(-6), UpdatedAt = DateTime.UtcNow.AddHours(-6) },
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000007"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000008"), RestaurantId = "restaurant-9", Status = "payment_failed", TotalAmount = 33.98m, Items = "[{\"name\":\"Coq au Vin\",\"price\":24.99},{\"name\":\"French Onion Soup\",\"price\":8.99}]", CreatedAt = DateTime.UtcNow.AddHours(-4), UpdatedAt = DateTime.UtcNow.AddHours(-4) },
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000008"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000009"), RestaurantId = "restaurant-10", Status = "confirmed", TotalAmount = 14.99m, Items = "[{\"name\":\"Bibimbap\",\"price\":14.99}]", CreatedAt = DateTime.UtcNow.AddHours(-3), UpdatedAt = DateTime.UtcNow.AddHours(-3) },
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000009"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000010"), RestaurantId = "restaurant-8", Status = "pending", TotalAmount = 20.98m, Items = "[{\"name\":\"Falafel Wrap\",\"price\":11.99},{\"name\":\"Hummus & Pita\",\"price\":8.99}]", CreatedAt = DateTime.UtcNow.AddHours(-1), UpdatedAt = DateTime.UtcNow.AddHours(-1) },
+            new Order { Id = Guid.Parse("10000000-0000-0000-0000-000000000010"), CustomerId = Guid.Parse("00000000-0000-0000-0000-000000000002"), RestaurantId = "restaurant-12", Status = "confirmed", TotalAmount = 44.98m, Items = "[{\"name\":\"Ribeye Steak\",\"price\":34.99},{\"name\":\"Wedge Salad\",\"price\":9.99}]", CreatedAt = DateTime.UtcNow.AddMinutes(-30), UpdatedAt = DateTime.UtcNow.AddMinutes(-30) }
+        };
+        db.Orders.AddRange(seedOrders);
+        db.SaveChanges();
+    }
 }
 
 // --- Health / Readiness endpoints ---

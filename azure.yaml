@@ -63,3 +63,9 @@ hooks:
       run: scripts/post-provision.sh
       interactive: true
       continueOnError: false
+  postdeploy:
+    posix:
+      shell: sh
+      run: scripts/post-deploy.sh
+      interactive: true
+      continueOnError: false
