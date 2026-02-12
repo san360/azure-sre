@@ -14,13 +14,16 @@ resource aksCluster 'Microsoft.ContainerService/managedClusters@2024-09-01' exis
   name: aksClusterName
 }
 
+// AcrPull role definition ID
+var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+
 // AcrPull role assignment: AKS kubelet identity → ACR
-// This is equivalent to `az aks update --attach-acr`
+// Standard GUID pattern: guid(scope, principalId, roleDefinitionId) ensures idempotency
 resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, aksCluster.id, 'acrpull')
+  name: guid(acr.id, aksCluster.properties.identityProfile.kubeletidentity.objectId, acrPullRoleId)
   scope: acr
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d') // AcrPull
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
     principalId: aksCluster.properties.identityProfile.kubeletidentity.objectId
     principalType: 'ServicePrincipal'
   }
