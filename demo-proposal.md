@@ -1208,14 +1208,408 @@ curl -s "https://${MCP_FQDN}/mcp" | jq .
 
 ---
 
-## 10. Timing Variants
+## 10. Official SRE Agent Samples — Integration Plan
 
-### Full Demo (70-85 min)
+> **Source repository:** [microsoft/sre-agent](https://github.com/microsoft/sre-agent) (public, MIT-licensed)
+> **Key paths:** `samples/bicep-deployment/`, `samples/automation/`, `samples/proactive-reliability/`
+
+Microsoft has published official samples for the Azure SRE Agent that include Infrastructure-as-Code templates, end-to-end incident automation walkthroughs, proactive reliability patterns, and reusable subagent YAML definitions. This section analyzes each sample area and outlines how we integrate them into the Contoso Meals demo.
+
+### 10.1 Bicep Deployment Templates — Automating SRE Agent Provisioning
+
+#### What the Official Repo Provides
+
+The `samples/bicep-deployment/` folder contains a **subscription-scoped Bicep template** that fully automates SRE Agent creation — something we currently do manually in Part 1 of the demo.
+
+| File | Purpose |
+|------|---------|
+| `minimal-sre-agent.bicep` | Subscription-scoped entry point — creates the resource group reference, invokes modules |
+| `sre-agent-resources.bicep` | Resource group-scoped module: Log Analytics Workspace, Application Insights, User-Assigned Managed Identity, Smart Detection alert rules, and the **`Microsoft.App/agents@2025-05-01-preview`** resource with `knowledgeGraphConfiguration`, `actionConfiguration`, and `logConfiguration` |
+| `role-assignments-minimal.bicep` | Role assignments for the deployment RG (Reader, Contributor, Log Analytics Reader based on access level; Key Vault Certificate/Secrets User) |
+| `role-assignments-target.bicep` | Role assignments for **target** resource groups — enables multi-RG and cross-subscription monitoring |
+| `deploy.sh` | Interactive bash script with 3 modes: interactive prompts, config file, and CLI flags |
+| `minimal-sre-agent.parameters.json` | Example parameters file |
+
+#### Key Capabilities We Don't Have Yet
+
+| Capability | Official Template | Our Current Setup |
+|-----------|-------------------|-------------------|
+| **Automated SRE Agent provisioning** | `Microsoft.App/agents@2025-05-01-preview` resource in Bicep | Manual portal creation in Part 1 Scene 1.1 |
+| **Cross-subscription targeting** | `targetResourceGroups` + `targetSubscriptions` arrays, matched by index | Single resource group only |
+| **Configurable access levels** | `High` (Reader + Contributor + Log Analytics Reader) vs `Low` (Log Analytics Reader only) | Reader role only (`sre-agent-role.bicep`) |
+| **Existing managed identity reuse** | `existingManagedIdentityId` parameter — supports bring-your-own identity | Always creates new identity |
+| **SRE Agent Administrator role** | Auto-assigns `e79298df-d852-4c6d-84f9-5d13249d1e55` (SRE Agent Administrator) to deployer | Not assigned |
+| **Smart Detection alerts** | Failure Anomalies Smart Detector alert rule with Action Group | Not provisioned |
+| **Agent mode selection** | `Review`, `Autonomous`, or `ReadOnly` mode parameter | Not configurable |
+
+#### Integration Plan for Contoso Meals
+
+**Goal:** Replace the manual SRE Agent creation in Part 1 Scene 1.1 with a single `az deployment sub create` that provisions the agent alongside all other infrastructure.
+
+1. **Add `sre-agent.bicep` module to `infra/modules/`** — Adapted from `sre-agent-resources.bicep`, scoped to our resource group, with Contoso Meals naming conventions
+2. **Upgrade `sre-agent-role.bicep`** — Adopt the tiered role model (High/Low access) from `role-assignments-minimal.bicep`, including Key Vault roles
+3. **Add target resource group support** — Wire `targetResourceGroups` parameter through `main.bicep` so the SRE Agent can monitor additional RGs (useful for enterprise demos where apps span multiple RGs)
+4. **Adopt the interactive `deploy.sh` pattern** — Either integrate into our existing `scripts/deploy.sh` or provide a "one-click SRE Agent" companion script
+
+```bicep
+// infra/modules/sre-agent.bicep (adapted from microsoft/sre-agent samples)
+@description('Name of the SRE Agent')
+param agentName string
+
+@description('Location for the SRE Agent')
+param location string
+
+@description('Resource ID of the user-assigned managed identity')
+param userAssignedIdentityId string
+
+@description('Application Insights connection string')
+param appInsightsConnectionString string
+
+@description('Application Insights App ID')
+param appInsightsAppId string
+
+@description('Access level: High (Contributor) or Low (Reader)')
+@allowed(['High', 'Low'])
+param accessLevel string = 'High'
+
+@description('Agent mode: Review, Autonomous, ReadOnly')
+@allowed(['Review', 'Autonomous', 'ReadOnly'])
+param agentMode string = 'Review'
+
+#disable-next-line BCP081
+resource sreAgent 'Microsoft.App/agents@2025-05-01-preview' = {
+  name: agentName
+  location: location
+  identity: {
+    type: 'SystemAssigned, UserAssigned'
+    userAssignedIdentities: {
+      '${userAssignedIdentityId}': {}
+    }
+  }
+  properties: {
+    knowledgeGraphConfiguration: {
+      identity: userAssignedIdentityId
+      managedResources: []
+    }
+    actionConfiguration: {
+      accessLevel: accessLevel
+      identity: userAssignedIdentityId
+      mode: agentMode
+    }
+    logConfiguration: {
+      applicationInsightsConfiguration: {
+        appId: appInsightsAppId
+        connectionString: appInsightsConnectionString
+      }
+    }
+  }
+}
+
+// Auto-assign SRE Agent Administrator role to deployer
+resource sreAgentAdminRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(sreAgent.id, deployer().objectId, 'e79298df-d852-4c6d-84f9-5d13249d1e55')
+  scope: sreAgent
+  properties: {
+    roleDefinitionId: resourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      'e79298df-d852-4c6d-84f9-5d13249d1e55' // SRE Agent Administrator
+    )
+    principalId: deployer().objectId
+    principalType: 'User'
+  }
+}
+
+output agentId string = sreAgent.id
+output agentPortalUrl string = 'https://portal.azure.com/#view/Microsoft_Azure_PaasServerless/AgentFrameBlade.ReactView/id/${replace(sreAgent.id, '/', '%2F')}'
+```
+
+**Demo impact:** Part 1 Scene 1.1 transforms from "click through the portal" to "look — the SRE Agent was deployed alongside the entire infrastructure in a single Bicep deployment." This is more enterprise-relevant.
+
+---
+
+### 10.2 Incident Automation — Octopets Memory Leak Pattern
+
+#### What the Official Repo Provides
+
+The `samples/automation/` folder contains a complete end-to-end incident automation walkthrough using a sample app called **Octopets** (a pet marketplace on Azure Container Apps).
+
+| Sample | What It Demonstrates |
+|--------|---------------------|
+| **`01-incident-automation-sample.md`** | Memory leak injection → PagerDuty incident → SRE Agent diagnoses via metrics/logs → Outlook notifications → GitHub issue with proposed code fix |
+| **`02-scheduled-health-check-sample.md`** | Daily scheduled task at 8 AM → `healthcheckagent` subagent autonomously checks CPU/memory/error rates → conditional email if anomalies found |
+| **`pd-azure-resource-error-handler.yaml`** | Full subagent YAML: 6-phase autonomous workflow (intake → diagnostics → source analysis → GitHub issue → email notifications → PD resolution) |
+| **`azurehealthcheck.yaml`** | Health check subagent YAML: auto-discover scope, collect 24h metrics, anomaly detection (3-sigma/MAD), conditional email |
+| **`00-configure-sre-agent.md`** | Step-by-step: connect incident platform, Outlook, GitHub repo mapping, subagent creation, incident trigger setup |
+| **`octopets-setup.md`** | Deploy Octopets via `azd up`, enable error generation with `Errors=true` env var |
+
+#### Key Patterns We Should Adopt
+
+**1. Subagent YAML Templates for Contoso Meals**
+
+The Octopets `pd-azure-resource-error-handler.yaml` is a masterclass in autonomous subagent design. Its 6-phase process — intake, diagnostics, source/IaC analysis, GitHub issue, email notifications, incident resolution — should be adapted for Contoso Meals:
+
+```yaml
+# Proposed: contoso-meals-incident-handler.yaml
+api_version: azuresre.ai/v1
+kind: AgentConfiguration
+spec:
+  name: ContosoMealsIncidentHandler
+  system_prompt: >-
+    Goal: Rapidly diagnose incidents for the Contoso Meals food ordering platform.
+    Collect evidence from AKS (order-api, payment-service), Container Apps (menu-api),
+    PostgreSQL (ordersdb), Cosmos DB (catalogdb), and Application Insights.
+    Correlate with Azure Chaos Studio experiments if active. Reference the
+    contoso-meals-runbook.md from Knowledge Base for escalation paths and SLAs.
+    Create GitHub issue with proposed fix and IaC recommendations.
+
+    Business context:
+    - payment-service failures = customers cannot complete orders (revenue loss)
+    - menu-api failures = customers cannot browse restaurants (degraded experience)
+    - order-api failures = full outage for new orders
+
+    Process:
+    1) Intake: identify affected service from alert/incident metadata
+    2) Diagnostics: KQL queries on App Insights, AKS pod health, Chaos Studio check
+    3) Knowledge Base: retrieve runbook for escalation and known issues
+    4) Source analysis: semantic search for root cause in code
+    5) GitHub issue: create with evidence, proposed fix, business impact
+    6) Notifications: Teams post + Outlook email with HTML-formatted summary
+
+    Send email updates to ops-team@contoso.com with subject:
+    "[Incident {incidentID}] {service} - {summary}"
+  tools:
+    - CreateGithubIssue
+    - FindConnectedGitHubRepo
+    - ListAvailableMetrics
+    - PlotTimeSeriesData
+    - GetMetricsTimeSeriesAnalysis
+    - QueryAppInsightsByResourceId
+    - QuerySourceBySemanticSearch
+    - QueryLogAnalyticsByResourceId
+    - RunAzCliReadCommands
+    - SendOutlookEmail
+    - PostTeamsMessage
+    - SearchMemory
+  handoff_description: >-
+    Delegate to this agent when a Contoso Meals service has an active incident.
+    Performs end-to-end diagnostics, evidence collection, GitHub issue creation,
+    and team notification. Does not execute remediations.
+  agent_type: Autonomous
+```
+
+**2. Scheduled Health Check for Contoso Meals**
+
+Adapt `azurehealthcheck.yaml` for a daily Contoso Meals health check:
+
+```yaml
+# Proposed: contoso-meals-health-check.yaml
+api_version: azuresre.ai/v1
+kind: AgentConfiguration
+spec:
+  name: ContosoMealsHealthCheck
+  system_prompt: >-
+    Goal: Detect anomalies in Contoso Meals platform health over the last 24 hours.
+    Check: AKS pod restarts, payment-service error rate, order-api latency,
+    menu-api Container App scaling, PostgreSQL connection utilization,
+    Cosmos DB RU consumption and 429 throttling.
+
+    Anomaly detection: flag when 24h max exceeds baseline by ≥3 MAD or z-score ≥3,
+    or error rate increases ≥2x vs prior comparable window.
+
+    If anomalies found: send HTML email to ops-team@contoso.com with resource,
+    metric, observed vs baseline, timeframe, and recommended next steps.
+    If no anomalies: complete without email.
+  tools:
+    - RunAzCliReadCommands
+    - GetResourceHealthInfo
+    - QueryLogAnalyticsByResourceId
+    - QueryAppInsightsByResourceId
+    - SendOutlookEmail
+  handoff_description: >-
+    Use for scheduled daily health monitoring of Contoso Meals platform.
+    Autonomous anomaly detection with conditional email notification.
+  agent_type: Autonomous
+```
+
+**3. Demo Enhancement: Show the Scheduled Task Configuration**
+
+Add a new scene to **Part 3** that demonstrates setting up a scheduled daily health check — directly mirroring the official `02-scheduled-health-check-sample.md`:
+
+> **Part 3, Scene 3.6 (NEW): "Scheduled Health Checks"** (3 min)
+>
+> Navigate to SRE Agent → Scheduled Tasks → Create:
+> - Task Name: `Daily Contoso Meals Health Check`
+> - Response Subagent: `ContosoMealsHealthCheck`
+> - Task Details: `check health of all Contoso Meals services`
+> - Frequency: Daily at 8:00 AM
+>
+> **Narrator:** *"Every morning at 8 AM before your team starts, the agent proactively checks all services and emails your team only if something looks wrong. No dashboard checking. No morning stand-up to review metrics."*
+
+---
+
+### 10.3 Proactive Reliability — Autonomous Remediation Pattern (.NET Day Demo)
+
+#### What the Official Repo Provides
+
+The `samples/proactive-reliability/` folder contains the **.NET Day 2025** demo — a sophisticated pattern where the SRE Agent autonomously detects performance degradation after a deployment and rolls back by executing a slot swap **without human approval**.
+
+| Component | Purpose |
+|-----------|---------|
+| **`AvgResponseBaseline.yaml`** | Scheduled subagent: queries App Insights for avg response time, stores `baseline.txt` in Knowledge Base |
+| **`DeploymentHealthCheck.yaml`** | Incident-triggered subagent: compares current response time to baseline, auto-swaps slots if >20% degradation, creates GitHub issue, posts to Teams |
+| **`DeploymentReporter.yaml`** | Scheduled subagent: reads Teams posts, builds deployment summary email with MTTD/MTTR metrics |
+| **`DynatraceLogAnalysisSubagent.yaml`** | Extends to Dynatrace log analysis via MCP (multi-cloud observability) |
+| **`DeploymentRemediationSubagent.yaml`** | Dynatrace-Azure deployment remediation via MCP |
+| **`1-setup-demo.ps1`** | One-time setup: deploys infra, builds healthy + problematic code, deploys to production + staging slots |
+| **`2-run-demo.ps1`** | Live demo: slot swap (bad → production), load generation, agent detects + remediates |
+| **`infrastructure/main.bicep`** | App Service with staging slot, App Insights, Activity Log alerts |
+
+#### The Three-Subagent Architecture
+
+This is the most sophisticated pattern in the official samples — a **three-subagent pipeline** with different trigger types:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  PROACTIVE RELIABILITY PIPELINE (from microsoft/sre-agent samples) │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  1. AvgResponseTime (Scheduled - Daily)                            │
+│     ├── Query App Insights: avg(duration) last 15 min              │
+│     ├── Upload baseline.txt to Knowledge Base                       │
+│     └── Stored: BaselineResponseTime + BaselineTimestamp            │
+│                                                                     │
+│  2. DeploymentHealthCheck (Incident Trigger - "slot swap" alert)   │
+│     ├── Query App Insights: current avg response time               │
+│     ├── Retrieve baseline.txt from Knowledge Base                   │
+│     ├── Compare: if current > baseline × 1.2 → DEGRADED            │
+│     ├── AUTO-EXECUTE: az webapp deployment slot swap                │
+│     ├── Create GitHub issue with semantic code search               │
+│     └── Post to Teams channel with deployment health report         │
+│                                                                     │
+│  3. DeploymentReporter (Scheduled - Daily)                          │
+│     ├── Read Teams messages for deployment health posts              │
+│     ├── Compile MTTD/MTTR metrics                                   │
+│     └── Send summary email to ops team                              │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Demo timeline from their walkthrough:**
+
+| Time | Event |
+|------|-------|
+| 0:00 | Run demo script — shows healthy production (~50ms) |
+| 0:30 | Slot swap executes — bad code goes to production (~1500ms) |
+| 1:30 | Load generation begins |
+| ~5:00 | Activity Log alert fires (slot swap detected) |
+| ~5:01 | SRE Agent incident trigger activates `DeploymentHealthCheck` |
+| ~5:03 | Agent compares metrics to baseline → detects 20%+ degradation |
+| ~5:04 | **Agent autonomously executes slot swap (rollback)** — no human approval |
+| ~5:30 | Production restored to healthy state |
+| ~6:00 | Agent posts to Teams, creates GitHub issue |
+
+#### Integration Plan for Contoso Meals
+
+**Option A: Adapt for App Service Slot Swap (New Scene)**
+
+Add menu-api as an App Service (instead of Container App) with staging slot, then demonstrate autonomous rollback:
+
+> **Part 5 (NEW): "Proactive Reliability — Fix Before They Feel It"** (10-15 min)
+>
+> **Scene 5.1: Baseline Learning** — Show the AvgResponseTime subagent capturing menu-api baseline response time and storing it in Knowledge Base.
+>
+> **Scene 5.2: Bad Deployment** — Swap staging slot (with artificial delay code) to production. Load Testing generates traffic. App Insights ingests degraded metrics.
+>
+> **Scene 5.3: Autonomous Remediation** — SRE Agent detects degradation, compares to baseline, and **autonomously executes slot swap rollback** without human approval. Posts to Teams, creates GitHub issue.
+>
+> **Narrator:** *"The agent learned what 'normal' looks like. When a bad deployment broke that pattern, it rolled back production in under a minute — before a single customer ticket was filed. Fix it before they feel it."*
+
+**Option B: Adapt for AKS Rollback (Contoso Meals Native)**
+
+Keep the AKS architecture but adapt the pattern for `kubectl rollout undo`:
+
+```yaml
+# Proposed scene: Agent detects payment-service degradation after a deployment,
+# compares to stored baseline, and autonomously executes:
+#   kubectl rollout undo deployment/payment-service -n production
+# Then posts to Teams and creates GitHub issue.
+```
+
+**Option C: Reference as Advanced Demo Extension**
+
+Keep the current four-part demo structure and reference the proactive reliability pattern as an "Advanced Demo Extension" for audiences interested in autonomous remediation and deployment safety.
+
+#### Recommended Approach: Option C (Reference) + Subagent YAMLs from Option A
+
+Keep the current demo focused on the four-part narrative, but:
+1. Create `ContosoMealsBaselineCapture.yaml` and `ContosoMealsDeploymentHealthCheck.yaml` subagent files in the repo
+2. Add a Section to Part 3 Scene 3.5 (Subagent Builder) that references the proactive reliability pattern
+3. Include the `.NET Day 2025` YouTube link as an advanced resource
+
+---
+
+### 10.4 Dynatrace & Multi-Cloud Observability Extension
+
+The `proactive-reliability/SubAgents/` folder includes two new subagents added 2 weeks ago:
+
+| Subagent | What It Does |
+|----------|-------------|
+| **`DynatraceLogAnalysisSubagent.yaml`** | Log analysis via Dynatrace MCP — extends SRE Agent to query non-Azure observability platforms |
+| **`DeploymentRemediationSubagent.yaml`** | Deployment remediation combining Dynatrace signals with Azure actions |
+
+**Demo Relevance:** For customers running hybrid/multi-cloud, this proves Azure SRE Agent is not Azure-only — it can ingest signals from Dynatrace, Datadog, or any MCP-enabled observability platform and still execute Azure remediation actions. This strengthens the competitive positioning in Section 9.
+
+**Proposed mention in demo:** Add to Part 2 Scene 2.3 discussion:
+> *"And if you're running Dynatrace or Datadog alongside Azure Monitor, the same MCP pattern applies — the official SRE Agent samples include Dynatrace log analysis subagents that query via MCP and correlate with Azure actions."*
+
+---
+
+### 10.5 Summary — What to Build from Official Samples
+
+| Item | Source | Target in Our Repo | Priority |
+|------|--------|-------------------|----------|
+| SRE Agent Bicep module (`Microsoft.App/agents`) | `sre-agent-resources.bicep` | `infra/modules/sre-agent.bicep` | **P0** — enables fully automated deployment |
+| Tiered role assignments (High/Low) | `role-assignments-minimal.bicep` | Upgrade `infra/modules/sre-agent-role.bicep` | **P0** — enterprise access control |
+| SRE Agent Administrator role assignment | `sre-agent-resources.bicep` | `infra/modules/sre-agent.bicep` | **P1** — deployer can manage agent |
+| Smart Detection alert rules | `sre-agent-resources.bicep` | `infra/modules/monitoring.bicep` | **P1** — proactive anomaly detection |
+| Incident handler subagent YAML | `pd-azure-resource-error-handler.yaml` | `subagents/contoso-meals-incident-handler.yaml` | **P1** — reusable in Part 3 |
+| Daily health check subagent YAML | `azurehealthcheck.yaml` | `subagents/contoso-meals-health-check.yaml` | **P1** — new demo scene |
+| Baseline capture subagent YAML | `AvgResponseBaseline.yaml` | `subagents/contoso-meals-baseline-capture.yaml` | **P2** — proactive reliability |
+| Deployment health check subagent YAML | `DeploymentHealthCheck.yaml` | `subagents/contoso-meals-deployment-health.yaml` | **P2** — autonomous remediation |
+| Deployment reporter subagent YAML | `DeploymentReporter.yaml` | `subagents/contoso-meals-deployment-reporter.yaml` | **P2** — daily summary |
+| Interactive deploy script | `deploy.sh` | `scripts/deploy-sre-agent.sh` | **P2** — standalone SRE Agent deployment |
+| Cross-subscription targeting parameters | `minimal-sre-agent.bicep` | `infra/main.bicep` parameters | **P3** — enterprise multi-RG demos |
+
+### 10.6 Updated Reference Resources
+
+| Resource | URL |
+|----------|-----|
+| Official SRE Agent Samples (GitHub) | https://github.com/microsoft/sre-agent/tree/main/samples |
+| Bicep Deployment Guide | https://github.com/microsoft/sre-agent/blob/main/samples/bicep-deployment/deployment-guide.md |
+| Incident Automation Sample (Octopets) | https://github.com/microsoft/sre-agent/blob/main/samples/automation/samples/01-incident-automation-sample.md |
+| Scheduled Health Check Sample | https://github.com/microsoft/sre-agent/blob/main/samples/automation/samples/02-scheduled-health-check-sample.md |
+| Configure SRE Agent Guide | https://github.com/microsoft/sre-agent/blob/main/samples/automation/configuration/00-configure-sre-agent.md |
+| PD Error Handler Subagent YAML | https://github.com/microsoft/sre-agent/blob/main/samples/automation/subagents/pd-azure-resource-error-handler.yaml |
+| Health Check Subagent YAML | https://github.com/microsoft/sre-agent/blob/main/samples/automation/subagents/azurehealthcheck.yaml |
+| Proactive Reliability Demo (.NET Day) | https://github.com/microsoft/sre-agent/tree/main/samples/proactive-reliability |
+| .NET Day 2025 YouTube Video | https://www.youtube.com/watch?v=Kx_6SB-mhgg |
+| Octopets Sample App | https://github.com/Azure-Samples/octopets |
+| Dynatrace Subagents | https://github.com/microsoft/sre-agent/tree/main/samples/proactive-reliability/SubAgents |
+
+---
+
+## 11. Timing Variants
+
+### Full Demo (85-100 min)
+All five parts + Q&A. Part 5 (Proactive Reliability) is optional — include for audiences interested in autonomous remediation.
+
+### Full Demo without Part 5 (70-85 min)
 All four parts + Q&A. Best for dedicated customer workshops or partner enablement. Part 4 can be omitted for audiences already using ServiceNow (built-in integration).
 
-### Conference Demo (25-35 min)
+### Conference Demo (30-40 min)
+- Scene 1.0: IaC deployment (show Bicep output with SRE Agent portal URL) — 2 min
 - Part 1: Scene 1.2 (MCP connection) + 1.5 (smoke test) — 7 min
-- Part 2: Scene 2.1 (cross-service investigation) — 8 min
+- Part 2: Scene 2.0 (morning health report) + Scene 2.1 (cross-service investigation) — 10 min
 - Part 3: Scene 3.2-3.3 (pre-triggered chaos + closed loop) — 10 min
 - Part 4: Scene 4.3 (incident → Jira ticket creation, pre-connected) — 5 min
 
@@ -1236,7 +1630,7 @@ For customers evaluating ITSM integration. Everything pre-configured.
 
 ---
 
-## 11. Handling Failures & Fallbacks
+## 12. Handling Failures & Fallbacks
 
 | Situation | Recovery |
 |-----------|----------|
@@ -1253,7 +1647,7 @@ For customers evaluating ITSM integration. Everything pre-configured.
 
 ---
 
-## 12. Pre-Demo Checklist
+## 13. Pre-Demo Checklist
 
 ### T-24 Hours
 - [ ] Run `az deployment sub create` to deploy all infrastructure
@@ -1303,7 +1697,7 @@ For customers evaluating ITSM integration. Everything pre-configured.
 
 ---
 
-## 13. Teardown
+## 14. Teardown
 
 ```bash
 # Delete everything
@@ -1319,7 +1713,7 @@ Approximate daily cost while running: $20-35. Tear down immediately after the de
 
 ---
 
-## 14. Reference Resources
+## 15. Reference Resources
 
 | Resource | URL |
 |----------|-----|
@@ -1341,6 +1735,10 @@ Approximate daily cost while running: $20-35. Tear down immediately after the de
 | ServiceNow Integration Blog | https://techcommunity.microsoft.com/blog/appsonazureblog/connect-azure-sre-agent-to-servicenow-end-to-end-incident-response/4487824 |
 | Observability & Multi-Cloud Blog | https://techcommunity.microsoft.com/blog/appsonazureblog/azure-sre-agent-expanding-observability-and-multi-cloud-resilience/4472719 |
 | Microsoft SRE Agent GitHub (Issues) | https://github.com/microsoft/sre-agent |
+| SRE Agent Bicep Deployment Samples | https://github.com/microsoft/sre-agent/tree/main/samples/bicep-deployment |
+| SRE Agent Automation Samples | https://github.com/microsoft/sre-agent/tree/main/samples/automation |
+| Proactive Reliability Demo (.NET Day 2025) | https://github.com/microsoft/sre-agent/tree/main/samples/proactive-reliability |
+| .NET Day 2025 YouTube: Fix It Before They Feel It | https://www.youtube.com/watch?v=Kx_6SB-mhgg |
 | DEM550 Session (YouTube) | Search: "DEM550 Azure SRE Agent" |
 | Agentic Ops Workshop | https://github.com/paulasilvatech/Agentic-Ops-Dev |
 | mcp-atlassian GitHub (MCP Server for Jira) | https://github.com/sooperset/mcp-atlassian |

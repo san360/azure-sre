@@ -15,6 +15,23 @@ param enableLoadTesting bool = true
 @description('Enable Jira Service Management deployment')
 param enableJira bool = true
 
+@description('Enable Azure SRE Agent provisioning via Bicep')
+param enableSreAgent bool = true
+
+@description('SRE Agent access level: High (Contributor) or Low (Reader)')
+@allowed(['High', 'Low'])
+param sreAgentAccessLevel string = 'High'
+
+@description('SRE Agent mode: Review (requires approval), Autonomous, or ReadOnly')
+@allowed(['Review', 'Autonomous', 'ReadOnly'])
+param sreAgentMode string = 'Review'
+
+@description('Additional resource group names the SRE Agent should have access to (cross-RG monitoring)')
+param targetResourceGroups array = []
+
+@description('Subscription IDs for target resource groups (parallel array with targetResourceGroups, defaults to deployment subscription)')
+param targetSubscriptions array = []
+
 @description('PostgreSQL deployment region')
 param postgresLocation string = 'swedencentral'
 
@@ -274,15 +291,17 @@ module sreAgentIdentity 'br/public:avm/res/managed-identity/user-assigned-identi
   }
 }
 
-// Role Assignment: Grant the SRE Agent identity Reader access on the resource group
-// This allows the Azure MCP server to list and query resources within rg-contoso-meals.
-// Scoped to the resource group (least-privilege) per Microsoft security best practices.
-// Reader built-in role definition ID: acdd72a7-3385-48ef-bd42-f606fba81ae7
+// Role Assignment: Grant the SRE Agent identity tiered access on the resource group
+// Adapted from official microsoft/sre-agent samples for tiered role assignment
+// High: Reader + Contributor + Log Analytics Reader + Key Vault roles
+// Low:  Reader + Log Analytics Reader
 module sreAgentRoleAssignment 'modules/sre-agent-role.bicep' = {
   scope: rg
-  name: 'sre-agent-role-reader'
+  name: 'sre-agent-role-assignments'
   params: {
     principalId: sreAgentIdentity.outputs.principalId
+    accessLevel: sreAgentAccessLevel
+    enableKeyVault: true
   }
 }
 
@@ -462,6 +481,41 @@ module chaos './modules/chaos.bicep' = if (enableChaos) {
     tags: tags
   }
 }
+
+// ─── Azure SRE Agent (optional) ────────────────────────────────────
+// Deploys the SRE Agent resource (Microsoft.App/agents@2025-05-01-preview)
+// Adapted from: https://github.com/microsoft/sre-agent/blob/main/samples/bicep-deployment/
+// Includes: Smart Detection alerts, SRE Agent Administrator role for deployer,
+//           and cross-RG targeting support
+module sreAgent './modules/sre-agent.bicep' = if (enableSreAgent) {
+  scope: rg
+  name: 'sre-agent'
+  params: {
+    agentName: '${prefix}-sre'
+    location: location
+    userAssignedIdentityId: sreAgentIdentity.outputs.resourceId
+    appInsightsResourceId: appInsights.outputs.resourceId
+    appInsightsAppId: appInsights.outputs.applicationId
+    appInsightsConnectionString: appInsights.outputs.connectionString
+    accessLevel: sreAgentAccessLevel
+    agentMode: sreAgentMode
+    tags: tags
+  }
+  dependsOn: [
+    sreAgentRoleAssignment
+  ]
+}
+
+// Target resource group role assignments (cross-RG monitoring)
+// Grants the SRE Agent identity access to additional resource groups
+module targetRoleAssignments 'modules/sre-agent-role-target.bicep' = [for (targetRG, index) in targetResourceGroups: if (enableSreAgent) {
+  name: 'sre-agent-target-role-${index}'
+  scope: resourceGroup(length(targetSubscriptions) > index ? targetSubscriptions[index] : subscription().subscriptionId, targetRG)
+  params: {
+    userAssignedIdentityPrincipalId: sreAgentIdentity.outputs.principalId
+    accessLevel: sreAgentAccessLevel
+  }
+}]
 
 // Outputs
 output resourceGroupName string = rg.name

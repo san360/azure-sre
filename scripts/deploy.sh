@@ -9,6 +9,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Ensure BuildKit is used for cross-platform Docker builds (arm64 host → amd64 images)
+export DOCKER_BUILDKIT=1
+
 # Configuration
 RESOURCE_GROUP="rg-contoso-meals"
 AKS_CLUSTER="aks-contoso-meals"
@@ -98,14 +101,17 @@ if [ -n "$ACR_NAME" ]; then
 
   az acr build --registry "$ACR_NAME" \
     --image contoso-meals/order-api:latest \
+    --platform linux/amd64 \
     "$PROJECT_ROOT/app/order-api/"
 
   az acr build --registry "$ACR_NAME" \
     --image contoso-meals/payment-service:latest \
+    --platform linux/amd64 \
     "$PROJECT_ROOT/app/payment-service/"
 
   az acr build --registry "$ACR_NAME" \
     --image contoso-meals/web-ui:latest \
+    --platform linux/amd64 \
     "$PROJECT_ROOT/app/web-ui/"
 
   # Update manifests with ACR name

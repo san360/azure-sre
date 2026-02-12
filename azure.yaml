@@ -15,6 +15,16 @@ services:
     k8s:
       namespace: production
       deploymentPath: ./manifests
+    hooks:
+      predeploy:
+        posix:
+          shell: sh
+          run: |
+            sed -i "s|image:.*order-api.*|image: ${SERVICE_ORDER_API_IMAGE_NAME}|" ./manifests/deployment.yaml
+      postdeploy:
+        posix:
+          shell: sh
+          run: git checkout -- ./manifests/deployment.yaml
   payment-service:
     project: ./app/payment-service
     host: aks
@@ -24,6 +34,16 @@ services:
     k8s:
       namespace: production
       deploymentPath: ./manifests
+    hooks:
+      predeploy:
+        posix:
+          shell: sh
+          run: |
+            sed -i "s|image:.*payment-service.*|image: ${SERVICE_PAYMENT_SERVICE_IMAGE_NAME}|" ./manifests/deployment.yaml
+      postdeploy:
+        posix:
+          shell: sh
+          run: git checkout -- ./manifests/deployment.yaml
   menu-api:
     project: ./app/menu-api
     host: containerapp
