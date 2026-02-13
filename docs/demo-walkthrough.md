@@ -112,14 +112,21 @@ for the query patterns?
 
 ## Part 3: "Lunch Rush Under Fire" (15-20 min)
 
-### Scene 3.1: Start Load Test (2 min)
-- Azure Portal → Load Testing → `lt-contoso-meals`
-- Start "Lunch Rush" test: 50 VUs, 10 min duration
+### Scene 3.1: Start Load + Chaos (2 min)
 
-### Scene 3.2: Start Chaos Experiment (1 min)
-- While load is running: Chaos Studio → Start `exp-contoso-meals-pod-kill`
+Option A — **Single command** (recommended):
+```bash
+./scripts/start-lunch-rush.sh
+```
+This starts the Azure Load Testing `lunch-rush` run, waits for traffic to ramp up,
+then automatically triggers the Chaos Studio `exp-contoso-meals-payment-incident`
+experiment (network latency + pod-kill on payment-service).
 
-### Scene 3.3: Agent Investigates (8 min)
+Option B — **Manual** (Portal):
+- Azure Portal → Load Testing → `lt-contoso-meals` → Start "Lunch Rush" test (50 VUs, 10 min)
+- While load is running: Chaos Studio → Start `exp-contoso-meals-payment-incident`
+
+### Scene 3.2: Agent Investigates (8 min)
 Wait for alert (1-2 min) or type:
 ```
 Customers are reporting that their food orders are failing at checkout.
@@ -127,7 +134,7 @@ The menu seems to work fine. Can you investigate what's happening with
 order processing and payments?
 ```
 
-### Scene 3.4: Closed-Loop Actions (5 min)
+### Scene 3.3: Closed-Loop Actions (5 min)
 Type:
 ```
 Send a summary of this investigation to the Teams channel. Include the
@@ -143,7 +150,7 @@ The chaos experiment has ended. Can you verify that error rates have
 returned to normal based on the Application Insights data?
 ```
 
-### Scene 3.5: Build Resilience Subagent (4 min)
+### Scene 3.4: Build Resilience Subagent (4 min)
 In SRE Agent → Subagent Builder → Create:
 - Name: "Contoso Meals Resilience Validator"
 - Instructions: See demo-proposal.md Scene 3.5
@@ -201,6 +208,78 @@ Final:
 ```
 Search Jira for all incidents related to payment-service in the last
 7 days. Are we seeing a pattern?
+```
+
+---
+
+## Part 4.5: "Infrastructure Under Fire — Hands-Off" (10-15 min)
+
+> **Purpose:** Demonstrate the SRE Agent autonomously detecting, triaging, remediating,
+> and closing a critical infrastructure-level failure — entirely hands-off.
+> Unlike Part 3 (application-level pod chaos), this targets the compute substrate itself.
+
+### Scene 4.5.1: Trigger Node Pool Failure (2 min)
+
+```bash
+# Full scenario: starts load test + chaos experiment + scales workload node pool to 0
+./scripts/start-node-failure.sh
+```
+
+The script:
+1. Starts an Azure Load Testing `lunch-rush` run (generates live customer traffic)
+2. Starts the Chaos Studio `exp-contoso-meals-nodepool-failure` experiment (pod-kill on workload nodes)
+3. Scales the AKS `workload` user node pool from 1 → 0 nodes
+
+All application pods (order-api, payment-service) become unschedulable.
+
+**Variants:**
+```bash
+./scripts/start-node-failure.sh --no-load        # skip load test
+./scripts/start-node-failure.sh --chaos-only      # only chaos (no load, no scale)
+./scripts/start-node-failure.sh --scale-only      # only scale to 0 (no load, no chaos)
+./scripts/start-node-failure.sh --test-id baseline # use a different load test
+```
+
+### Scene 4.5.2: Hands-Off — Watch the SRE Agent (8-12 min)
+
+**Do nothing.** The SRE Agent handles the entire incident lifecycle autonomously:
+
+1. **Detection (T+1-2 min):** Azure Monitor alerts fire:
+   - `AKS Workload Node Pool - Node NotReady`
+   - `AKS Workload Node Pool Scaled to Zero Nodes`
+   - `AKS Pods Unschedulable - No Available Nodes`
+
+2. **Triage (T+2 min):** Agent creates a P1 Jira ticket in the CONTOSO project with
+   blast radius assessment and affected services.
+
+3. **Investigation (T+2-5 min):** Agent posts Jira comments as it investigates:
+   - AKS node pool status → 0/1 nodes ready
+   - Pod status → order-api and payment-service in Pending state
+   - Application Insights → error rate spike correlating with load test data
+   - Root cause → workload node pool scaled to 0
+
+4. **Remediation (T+5-8 min):** Agent scales the workload node pool back to 1 node.
+
+5. **Verification (T+8-12 min):** Agent confirms node is Ready, pods are Running,
+   error rates return to baseline.
+
+6. **Resolution:** Agent resolves the Jira ticket with full incident timeline,
+   business impact, and remediation summary.
+
+**Show side-by-side:**
+- `kubectl get pods -n production -w` — watch pods go Pending → Running
+- Jira CONTOSO board — real-time investigation comments and resolution
+
+### Scene 4.5.3: Recap (1 min)
+
+**Narrator:** *"From detection to resolution — fully autonomous, fully hands-off.
+The on-call engineer received a clean incident report with root cause, business
+impact quantified from the load test, and remediation details — without lifting a finger."*
+
+### Manual Restore (if agent doesn't auto-remediate)
+
+```bash
+./scripts/start-node-failure.sh --restore
 ```
 
 ---

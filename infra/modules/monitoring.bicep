@@ -1,6 +1,9 @@
 param logAnalyticsWorkspaceId string
+param appInsightsResourceId string
 param prefix string
 param tags object
+param paymentServiceUrl string = ''
+param location string = resourceGroup().location
 
 // Action Group for SRE Agent
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
@@ -26,7 +29,8 @@ resource podRestartLogAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-p
     enabled: true
     scopes: [logAnalyticsWorkspaceId]
     evaluationFrequency: 'PT1M'
-    windowSize: 'PT5M'
+    windowSize: 'PT10M'
+    autoMitigate: true
     criteria: {
       allOf: [
         {
@@ -43,7 +47,7 @@ resource podRestartLogAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-p
   }
 }
 
-// Payment Service P95 Latency Alert (scheduled query rule against Log Analytics)
+// Payment Service P95 Latency Alert (scoped to Application Insights for SRE Agent visibility)
 resource paymentLatencyAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
   name: 'alert-payment-latency-${prefix}'
   location: resourceGroup().location
@@ -52,13 +56,14 @@ resource paymentLatencyAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-
     displayName: 'Payment Service P95 Latency > 2s'
     severity: 2
     enabled: true
-    scopes: [logAnalyticsWorkspaceId]
+    scopes: [appInsightsResourceId]
     evaluationFrequency: 'PT1M'
-    windowSize: 'PT5M'
+    windowSize: 'PT10M'
+    autoMitigate: true
     criteria: {
       allOf: [
         {
-          query: 'AppRequests | where Name contains "payment" | summarize percentile(DurationMs, 95) by bin(TimeGenerated, 5m) | where percentile_DurationMs_95 > 2000'
+          query: 'requests | where name contains "/pay" | summarize percentile(duration, 95) by bin(timestamp, 5m) | where percentile_duration_95 > 2000'
           timeAggregation: 'Count'
           operator: 'GreaterThan'
           threshold: 0
@@ -71,7 +76,7 @@ resource paymentLatencyAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-
   }
 }
 
-// Payment Service Error Rate Alert — catches HTTP 5xx errors (e.g. from pod failures)
+// Payment Service Error Rate Alert — catches HTTP 5xx errors (scoped to Application Insights)
 resource paymentErrorAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
   name: 'alert-payment-errors-${prefix}'
   location: resourceGroup().location
@@ -80,13 +85,14 @@ resource paymentErrorAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-pr
     displayName: 'Payment Service Error Rate > 10%'
     severity: 1
     enabled: true
-    scopes: [logAnalyticsWorkspaceId]
+    scopes: [appInsightsResourceId]
     evaluationFrequency: 'PT1M'
-    windowSize: 'PT5M'
+    windowSize: 'PT10M'
+    autoMitigate: true
     criteria: {
       allOf: [
         {
-          query: 'AppRequests | where Name contains "payment" | summarize Total = count(), Errors = countif(toint(ResultCode) >= 500) by bin(TimeGenerated, 5m) | extend ErrorRate = round(100.0 * Errors / Total, 1) | where ErrorRate > 10'
+          query: 'requests | where name contains "/pay" | summarize Total = count(), Errors = countif(toint(resultCode) >= 500) by bin(timestamp, 5m) | extend ErrorRate = round(100.0 * Errors / Total, 1) | where ErrorRate > 10'
           timeAggregation: 'Count'
           operator: 'GreaterThan'
           threshold: 0
@@ -112,7 +118,8 @@ resource nodeNotReadyAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-pr
     enabled: true
     scopes: [logAnalyticsWorkspaceId]
     evaluationFrequency: 'PT1M'
-    windowSize: 'PT5M'
+    windowSize: 'PT10M'
+    autoMitigate: true
     criteria: {
       allOf: [
         {
@@ -140,7 +147,8 @@ resource nodePoolZeroAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-pr
     enabled: true
     scopes: [logAnalyticsWorkspaceId]
     evaluationFrequency: 'PT1M'
-    windowSize: 'PT5M'
+    windowSize: 'PT10M'
+    autoMitigate: true
     criteria: {
       allOf: [
         {
@@ -168,7 +176,8 @@ resource podUnschedulableAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-1
     enabled: true
     scopes: [logAnalyticsWorkspaceId]
     evaluationFrequency: 'PT1M'
-    windowSize: 'PT5M'
+    windowSize: 'PT10M'
+    autoMitigate: true
     criteria: {
       allOf: [
         {
@@ -182,5 +191,75 @@ resource podUnschedulableAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-1
     actions: {
       actionGroups: [actionGroup.id]
     }
+  }
+}
+
+// ─── Application Insights Standard Availability Test ──────────────
+
+// Standard web test that pings the Payment Service /health endpoint
+// from multiple Azure regions to monitor uptime and response time.
+// Only deployed when a payment service URL is provided.
+resource paymentHealthTest 'Microsoft.Insights/webtests@2022-06-15' = if (!empty(paymentServiceUrl)) {
+  name: 'webtest-payment-health-${prefix}'
+  location: location
+  tags: union(tags, {
+    // Tag linking the web test to the App Insights resource (required for alert correlation)
+    'hidden-link:${appInsightsResourceId}': 'Resource'
+  })
+  properties: {
+    SyntheticMonitorId: 'webtest-payment-health-${prefix}'
+    Name: 'Payment Service Health Check'
+    Enabled: true
+    Frequency: 300       // every 5 minutes
+    Timeout: 30          // 30 second timeout
+    Kind: 'standard'
+    RetryEnabled: true
+    Locations: [
+      { Id: 'us-va-ash-azr' }       // East US
+      { Id: 'emea-nl-ams-azr' }     // West Europe
+      { Id: 'emea-gb-db3-azr' }     // UK South
+      { Id: 'apac-sg-sin-azr' }     // Southeast Asia
+      { Id: 'us-ca-sjc-azr' }       // West US
+    ]
+    Request: {
+      RequestUrl: '${paymentServiceUrl}/health'
+      HttpVerb: 'GET'
+      ParseDependentRequests: false
+      FollowRedirects: true
+    }
+    ValidationRules: {
+      ExpectedHttpStatusCode: 200
+      SSLCheck: true
+      SSLCertRemainingLifetimeCheck: 7
+    }
+  }
+}
+
+// Alert that fires when the availability test detects failures from 2+ locations
+resource paymentAvailabilityAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = if (!empty(paymentServiceUrl)) {
+  name: 'alert-payment-availability-${prefix}'
+  location: 'global'
+  tags: tags
+  properties: {
+    description: 'Payment Service health endpoint is failing from multiple locations'
+    severity: 1
+    enabled: true
+    scopes: [
+      appInsightsResourceId
+      paymentHealthTest.id
+    ]
+    evaluationFrequency: 'PT1M'
+    windowSize: 'PT5M'
+    criteria: {
+      'odata.type': 'Microsoft.Azure.Monitor.WebtestLocationAvailabilityCriteria'
+      webTestId: paymentHealthTest.id
+      componentId: appInsightsResourceId
+      failedLocationCount: 2
+    }
+    actions: [
+      {
+        actionGroupId: actionGroup.id
+      }
+    ]
   }
 }

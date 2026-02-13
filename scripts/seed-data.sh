@@ -284,6 +284,14 @@ PAYMENT_METHODS=("credit_card" "debit_card" "apple_pay" "google_pay")
 
 # Build combined customer + restaurant pools (seeded + originals)
 ALL_CUST_IDS=("${CUSTOMER_IDS[@]}")
+# Add original seed customer IDs as fallbacks
+ALL_CUST_IDS+=(
+  "00000000-0000-0000-0000-000000000001"
+  "00000000-0000-0000-0000-000000000002"
+  "00000000-0000-0000-0000-000000000003"
+  "00000000-0000-0000-0000-000000000004"
+  "00000000-0000-0000-0000-000000000005"
+)
 ALL_REST_IDS=("${RESTAURANT_IDS[@]}")
 # Add original seed restaurant IDs
 ALL_REST_IDS+=("restaurant-1" "restaurant-2" "restaurant-3" "restaurant-4")

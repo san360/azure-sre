@@ -83,14 +83,3 @@ spec:
       targetPort: 8080
       protocol: TCP
       name: http
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: order-api-pdb
-  namespace: production
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: order-api

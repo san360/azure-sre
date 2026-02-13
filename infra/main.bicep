@@ -27,6 +27,9 @@ param sreAgentAccessLevel string = 'High'
 @allowed(['Review', 'Autonomous', 'ReadOnly'])
 param sreAgentMode string = 'Review'
 
+@description('External URL of the Payment Service (e.g. http://<LB-IP>). Empty = skip availability test.')
+param paymentServiceUrl string = ''
+
 @description('Additional resource group names the SRE Agent should have access to (cross-RG monitoring)')
 param targetResourceGroups array = []
 
@@ -489,8 +492,11 @@ module monitoring './modules/monitoring.bicep' = {
   name: 'monitoring'
   params: {
     logAnalyticsWorkspaceId: logAnalytics.outputs.resourceId
+    appInsightsResourceId: appInsights.outputs.resourceId
     prefix: prefix
     tags: tags
+    paymentServiceUrl: paymentServiceUrl
+    location: location
   }
 }
 

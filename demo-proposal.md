@@ -702,6 +702,78 @@ The agent uses `jira_search` with JQL: `project = CONTOSO AND labels = payment-s
 
 ---
 
+### Part 4.5: "Infrastructure Under Fire — Hands-Off Autonomous Remediation" (10-15 min)
+
+**Why this part matters:** Parts 3-4 showed the agent investigating application-level failures with human prompting. Part 4.5 goes further — the **entire infrastructure disappears**, and the agent handles detection, triage, remediation, and resolution **completely hands-off**. No human typing. No prompting. The SRE on-call engineer simply watches the Jira ticket fill with investigation notes and receives a final resolution summary.
+
+This is the demo's capstone: proof that the SRE Agent is not just a chatbot that answers questions — it's an autonomous operator that can recover infrastructure.
+
+#### Scene 4.5.1: Trigger Node Pool Failure (2 min)
+
+Run the node pool failure script:
+
+```bash
+./scripts/start-node-failure.sh
+```
+
+This single command:
+1. **Starts an Azure Load Testing `lunch-rush` run** — generates realistic customer traffic so Application Insights has meaningful error data
+2. **Starts the Chaos Studio `exp-contoso-meals-nodepool-failure` experiment** — kills pods on workload nodes
+3. **Scales the AKS `workload` user node pool from 1 → 0** — all VMs deallocated, all pods evicted
+
+**Narrator:** *"We've tested application-level failures with pod chaos. Now let's go deeper — what happens when the infrastructure itself disappears? We're scaling the entire workload node pool to zero while customer traffic is flowing. Every order-api and payment-service pod is now unschedulable. And this time, I'm not going to type anything. We'll watch the SRE Agent handle this completely hands-off."*
+
+**Script variants:**
+| Command | What It Does |
+|---------|-------------|
+| `./scripts/start-node-failure.sh` | Full: load test + chaos + scale to 0 |
+| `./scripts/start-node-failure.sh --no-load` | Chaos + scale only (skip load test) |
+| `./scripts/start-node-failure.sh --chaos-only` | Only chaos experiment (no load, no scale) |
+| `./scripts/start-node-failure.sh --scale-only` | Only scale to 0 (no load, no chaos) |
+| `./scripts/start-node-failure.sh --test-id baseline` | Full with a different load test |
+| `./scripts/start-node-failure.sh --restore` | Restore node pool to 1 node |
+
+#### Scene 4.5.2: Hands-Off — Watch the Agent Work (8-12 min)
+
+**Do nothing.** Open three views side-by-side:
+- **SRE Agent chat** — watch the agent receive alerts and begin investigating
+- **Jira CONTOSO board** — ticket appears and fills with real-time investigation comments
+- **Terminal:** `kubectl get pods -n production -w` — pods go Pending → Running after remediation
+
+**What happens autonomously:**
+
+| Time | Agent Action |
+|------|-------------|
+| T+1-2 min | Azure Monitor alerts fire: Node NotReady, Node Pool Scaled to Zero, Pods Unschedulable |
+| T+2 min | Agent creates P1 Jira ticket with blast radius and affected services |
+| T+2-3 min | Investigation comment: *"AKS workload pool has 0/1 nodes ready"* |
+| T+3-4 min | Investigation comment: *"order-api and payment-service pods in Pending state — FailedScheduling"* |
+| T+4-5 min | Investigation comment: *"Application Insights shows error rate spiked from 0.2% to 100%"* |
+| T+5 min | Root cause: *"workload node pool scaled to 0 — no compute available"* |
+| T+5-6 min | **Remediation:** Agent scales node pool back to 1 node |
+| T+8-10 min | **Verification:** Node Ready, pods Running, error rate returning to baseline |
+| T+10-12 min | **Resolution:** Jira ticket closed with full incident timeline and business impact |
+
+**Narrator:** *"Watch the Jira ticket. Every investigation step appears as a work note — node pool status, pod scheduling failures, error rate quantified from the load test. The agent determined the root cause, scaled the infrastructure back, verified recovery, and closed the ticket. From detection to resolution — fully autonomous, fully hands-off."*
+
+**Key aha moments:**
+- The agent **remediated infrastructure** (scaled a node pool), not just reported on it
+- Business impact was quantified using the load test data: *"100% of orders failed for X minutes"*
+- The Jira ticket has a complete audit trail — no human intervention required
+- The on-call engineer received a clean incident report without lifting a finger
+
+#### Scene 4.5.3: Manual Restore (fallback)
+
+If the SRE Agent doesn't auto-remediate (e.g., agent mode is `Review` instead of `Autonomous`):
+
+```bash
+./scripts/start-node-failure.sh --restore
+```
+
+**Narrator:** *"In Review mode, the agent would propose the remediation and wait for approval. In Autonomous mode — which we just saw — it executed immediately. The mode is a Bicep parameter: `sreAgentMode: 'Autonomous'`."*
+
+---
+
 ## 7. Infrastructure as Code: Bicep with Azure Verified Modules
 
 ### Project Structure
@@ -1494,88 +1566,17 @@ The `samples/automation/` folder contains a complete end-to-end incident automat
 
 The Octopets `pd-azure-resource-error-handler.yaml` is a masterclass in autonomous subagent design. Its 6-phase process — intake, diagnostics, source/IaC analysis, GitHub issue, email notifications, incident resolution — should be adapted for Contoso Meals:
 
-```yaml
-# Proposed: contoso-meals-incident-handler.yaml
-api_version: azuresre.ai/v1
-kind: AgentConfiguration
-spec:
-  name: ContosoMealsIncidentHandler
-  system_prompt: >-
-    Goal: Rapidly diagnose incidents for the Contoso Meals food ordering platform.
-    Collect evidence from AKS (order-api, payment-service), Container Apps (menu-api),
-    PostgreSQL (ordersdb), Cosmos DB (catalogdb), and Application Insights.
-    Correlate with Azure Chaos Studio experiments if active. Reference the
-    contoso-meals-runbook.md from Knowledge Base for escalation paths and SLAs.
-    Create GitHub issue with proposed fix and IaC recommendations.
-
-    Business context:
-    - payment-service failures = customers cannot complete orders (revenue loss)
-    - menu-api failures = customers cannot browse restaurants (degraded experience)
-    - order-api failures = full outage for new orders
-
-    Process:
-    1) Intake: identify affected service from alert/incident metadata
-    2) Diagnostics: KQL queries on App Insights, AKS pod health, Chaos Studio check
-    3) Knowledge Base: retrieve runbook for escalation and known issues
-    4) Source analysis: semantic search for root cause in code
-    5) GitHub issue: create with evidence, proposed fix, business impact
-    6) Notifications: Teams post + Outlook email with HTML-formatted summary
-
-    Send email updates to ops-team@contoso.com with subject:
-    "[Incident {incidentID}] {service} - {summary}"
-  tools:
-    - CreateGithubIssue
-    - FindConnectedGitHubRepo
-    - ListAvailableMetrics
-    - PlotTimeSeriesData
-    - GetMetricsTimeSeriesAnalysis
-    - QueryAppInsightsByResourceId
-    - QuerySourceBySemanticSearch
-    - QueryLogAnalyticsByResourceId
-    - RunAzCliReadCommands
-    - SendOutlookEmail
-    - PostTeamsMessage
-    - SearchMemory
-  handoff_description: >-
-    Delegate to this agent when a Contoso Meals service has an active incident.
-    Performs end-to-end diagnostics, evidence collection, GitHub issue creation,
-    and team notification. Does not execute remediations.
-  agent_type: Autonomous
-```
+> **YAML definition:** [`subagents/contoso-meals-incident-handler.yaml`](subagents/contoso-meals-incident-handler.yaml)
+>
+> Full incident handler with 5-phase process (Intake → Investigation → Assessment → Jira → Remediation Decision), Jira MCP integration, and handoffs to AutoRemediator + ResilienceValidator.
 
 **2. Scheduled Health Check for Contoso Meals**
 
 Adapt `azurehealthcheck.yaml` for a daily Contoso Meals health check:
 
-```yaml
-# Proposed: contoso-meals-health-check.yaml
-api_version: azuresre.ai/v1
-kind: AgentConfiguration
-spec:
-  name: ContosoMealsHealthCheck
-  system_prompt: >-
-    Goal: Detect anomalies in Contoso Meals platform health over the last 24 hours.
-    Check: AKS pod restarts, payment-service error rate, order-api latency,
-    menu-api Container App scaling, PostgreSQL connection utilization,
-    Cosmos DB RU consumption and 429 throttling.
-
-    Anomaly detection: flag when 24h max exceeds baseline by ≥3 MAD or z-score ≥3,
-    or error rate increases ≥2x vs prior comparable window.
-
-    If anomalies found: send HTML email to ops-team@contoso.com with resource,
-    metric, observed vs baseline, timeframe, and recommended next steps.
-    If no anomalies: complete without email.
-  tools:
-    - RunAzCliReadCommands
-    - GetResourceHealthInfo
-    - QueryLogAnalyticsByResourceId
-    - QueryAppInsightsByResourceId
-    - SendOutlookEmail
-  handoff_description: >-
-    Use for scheduled daily health monitoring of Contoso Meals platform.
-    Autonomous anomaly detection with conditional email notification.
-  agent_type: Autonomous
-```
+> **YAML definition:** [`subagents/contoso-meals-health-check.yaml`](subagents/contoso-meals-health-check.yaml)
+>
+> Daily anomaly detection across AKS, PostgreSQL, Cosmos DB, and Container Apps with conditional email notification.
 
 **3. Demo Enhancement: Show the Scheduled Task Configuration**
 
@@ -1720,8 +1721,10 @@ The `proactive-reliability/SubAgents/` folder includes two new subagents added 2
 | SRE Agent Administrator role assignment | `sre-agent-resources.bicep` | `infra/modules/sre-agent.bicep` | **Done** |
 | Smart Detection alert rules | `sre-agent-resources.bicep` | `infra/modules/sre-agent.bicep` | **Done** |
 | Deploy script SRE Agent output | `deploy.sh` | `scripts/deploy.sh` | **Done** |
-| Incident handler subagent YAML | `pd-azure-resource-error-handler.yaml` | `subagents/contoso-meals-incident-handler.yaml` | **P1** — reusable in Part 3 |
-| Daily health check subagent YAML | `azurehealthcheck.yaml` | `subagents/contoso-meals-health-check.yaml` | **P1** — new demo scene |
+| Incident handler subagent YAML | `pd-azure-resource-error-handler.yaml` | `subagents/contoso-meals-incident-handler.yaml` | **Done** |
+| Daily health check subagent YAML | `azurehealthcheck.yaml` | `subagents/contoso-meals-health-check.yaml` | **Done** |
+| Auto-remediator subagent YAML | *(custom)* | `subagents/contoso-meals-auto-remediator.yaml` | **Done** |
+| Resilience validator subagent YAML | *(custom)* | `subagents/contoso-meals-resilience-validator.yaml` | **Done** |
 | Baseline capture subagent YAML | `AvgResponseBaseline.yaml` | `subagents/contoso-meals-baseline-capture.yaml` | **P2** — proactive reliability |
 | Deployment health check subagent YAML | `DeploymentHealthCheck.yaml` | `subagents/contoso-meals-deployment-health.yaml` | **P2** — autonomous remediation |
 | Deployment reporter subagent YAML | `DeploymentReporter.yaml` | `subagents/contoso-meals-deployment-reporter.yaml` | **P2** — daily summary |
@@ -1748,23 +1751,23 @@ The `proactive-reliability/SubAgents/` folder includes two new subagents added 2
 ## 11. Timing Variants
 
 ### Full Demo (85-100 min)
-All five parts + Q&A. Part 5 (Proactive Reliability) is optional — include for audiences interested in autonomous remediation.
+All five parts (1-4 + 4.5) + Q&A. Part 5 (Proactive Reliability) is optional — include for audiences interested in autonomous deployment rollback.
 
-### Full Demo without Part 5 (70-85 min)
-All four parts + Q&A. Best for dedicated customer workshops or partner enablement. Part 4 can be omitted for audiences already using ServiceNow (built-in integration).
+### Full Demo without Part 4.5 (70-85 min)
+Parts 1-4 + Q&A. Best for dedicated customer workshops or partner enablement. Part 4 can be omitted for audiences already using ServiceNow (built-in integration).
 
 ### Conference Demo (30-40 min)
 - Scene 1.0: IaC deployment (show Bicep output with SRE Agent portal URL) — 2 min
 - Part 1: Scene 1.2 (MCP connection) + 1.5 (smoke test) — 7 min
 - Part 2: Scene 2.0 (morning health report) + Scene 2.1 (cross-service investigation) — 10 min
 - Part 3: Scene 3.2-3.3 (pre-triggered chaos + closed loop) — 10 min
-- Part 4: Scene 4.3 (incident → Jira ticket creation, pre-connected) — 5 min
+- Part 4.5: Node pool failure hands-off (pre-triggered, show Jira trail) — 5 min
 
 ### Executive Demo (15-17 min)
 - Part 1: Describe MCP connection (pre-configured) — 2 min
 - Part 2: Live cross-service investigation — 5 min
-- Part 3: Pre-triggered chaos investigation + Teams notification — 8 min
-- Part 4: Show completed Jira ticket with investigation trail — 2 min
+- Part 3: Pre-triggered chaos investigation + Teams notification — 5 min
+- Part 4.5: Show node pool failure Jira ticket trail (hands-off) — 5 min
 
 ### Lightning Demo (8 min)
 Everything pre-configured. Open the agent chat and run Scene 2.1 (cross-service investigation) live. This single scene demonstrates the unique value.

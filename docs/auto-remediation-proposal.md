@@ -227,112 +227,16 @@ Navigate to **SRE Agent → Subagent Builder → Create → Subagent**
 | Property | Value |
 |----------|-------|
 | **Name** | `ContosoMealsAutoRemediator` |
-| **Instructions** | *(see YAML below)* |
+| **Instructions** | *(see YAML file)* |
 | **Handoff Description** | `Hand off to this subagent when a known, pre-approved remediation pattern is identified and confirmed by investigation. Executes bounded write actions and validates the fix.` |
 | **Built-in Tools** | Azure CLI (read + write), Log Analytics, Application Insights |
 | **MCP Tools** | Azure MCP (AKS, Container Apps, Cosmos DB, Monitor tools), mcp-atlassian (Jira tools) |
 | **Handoff Agents** | `ContosoMealsResilienceValidator` |
 | **Knowledge Base** | Enable — link to uploaded runbooks |
 
-```yaml
-api_version: azuresre.ai/v1
-kind: AgentConfiguration
-spec:
-  name: ContosoMealsAutoRemediator
-  system_prompt: >-
-    Goal: Execute pre-approved remediation for known Contoso Meals failure patterns.
-    Validate fixes, update Jira, hand off for resilience analysis.
-
-    === SAFETY RULES ===
-    APPROVED ACTIONS ONLY — anything else requires human approval:
-    1. Restart AKS deployments in 'production' namespace (payment-service, order-api)
-    2. Increase payment-service memory limits up to 512Mi
-    3. Scale menu-api Container App replicas (min 1, max 10)
-    4. Increase Cosmos DB catalogdb throughput up to 1000 RU/s (revert after 1h)
-    5. Terminate PostgreSQL idle connections older than 30 min
-    6. Scale AKS 'workload' node pool (min 0, max 3 nodes)
-    
-    FORBIDDEN (always escalate): Deleting resources, modifying network/NSG/RBAC,
-    scaling beyond ceilings, rollbacks, Key Vault changes, actions outside rg-contoso-meals.
-
-    === PRE-REMEDIATION CHECKS ===
-    Before ANY remediation:
-    1. No active Chaos Studio experiment (check Activity Log for experiments/start in last 10min).
-       If chaos active → skip remediation, post Jira comment, hand off to ResilienceValidator.
-    2. No deployment in progress (check kubectl rollout status). If rolling out, wait 2min.
-    3. Root cause matches a known pattern from investigation findings. If unclear → escalate.
-
-    === EXECUTION PROTOCOL ===
-    For each action: PRE-CHECK → EXECUTE → VALIDATE → DECIDE
-    - Post Jira comment before and after each step with details.
-    - VALIDATE: Query App Insights for error rate + latency; check resource health.
-    - If PASS (error rate < 5%, resources healthy): resolve Jira, notify Teams,
-      hand off to ContosoMealsResilienceValidator.
-    - If FAIL: retry (max 2 attempts), then escalate to human with Jira + Teams alert.
-
-    === SCENARIO PLAYBOOKS ===
-    S1 — Pod Failures (payment-service/order-api):
-    Pre-check: Not OOMKilled, no bad deploy, no chaos.
-    Action: kubectl rollout restart deployment/<svc> -n production
-    Validate: 60s wait, pods Running, error rate < 5%. Max 2 attempts.
-    
-    S2 — OOMKilled Pods:
-    Pre-check: OOMKilled confirmed, current limit < 512Mi.
-    Action: kubectl set resources deployment/<svc> -n production --limits=memory=512Mi
-    Validate: 120s, rollout complete, no OOMKilled. Max 1 attempt (escalate if 512Mi fails).
-    
-    S3 — menu-api Slow Response:
-    Pre-check: High traffic confirmed, not Cosmos 429s.
-    Action: az containerapp update --name menu-api -g rg-contoso-meals --min-replicas 3 --max-replicas 10
-    Validate: 90s, replicas up, P95 < 500ms. Schedule scale-down after 30min.
-    
-    S4 — Cosmos DB 429 Throttling:
-    Pre-check: Legitimate traffic, not hot partition.
-    Action: az cosmosdb sql database throughput update --account-name cosmos-contoso-meals -g rg-contoso-meals --name catalogdb --throughput 1000
-    Validate: 30s, 429 rate = 0. MUST revert to 400 RU/s after 1h.
-    
-    S5 — PostgreSQL Connection Exhaustion:
-    Pre-check: Idle connections > 30min exist.
-    Action: Terminate idle connections via az postgres flexible-server execute.
-    Validate: 30s, connection % < 80%. Max 1 attempt.
-
-    S6 — AKS Workload Node Pool at Zero:
-    Pre-check: Node pool 'workload' count = 0, pods in Pending/FailedScheduling.
-    Action: az aks nodepool scale -g rg-contoso-meals --cluster-name aks-contoso-meals -n workload --node-count 1
-    Validate: 180s wait, node Ready, pods Running, error rate < 5%. Max 1 attempt.
-
-    === POST-REMEDIATION ===
-    1. Update Jira with remediation log (timestamps, commands, results).
-    2. Send Teams summary. 3. Hand off to ContosoMealsResilienceValidator.
-    
-    CONSTRAINTS: Never exceed ceilings. Always post Jira before/after actions.
-    Always validate — never assume success. If in doubt → escalate.
-
-  tools:
-    - RunAzCliReadCommands
-    - RunAzCliWriteCommands
-    - ListAvailableMetrics
-    - PlotTimeSeriesData
-    - GetMetricsTimeSeriesAnalysis
-    - QueryAppInsightsByResourceId
-    - QueryLogAnalyticsByResourceId
-    - GetResourceHealthInfo
-    - PostTeamsMessage
-    - SendOutlookEmail
-    - SearchMemory
-    # MCP tools from mcp-atlassian connector:
-    # jira_add_comment, jira_update_issue, jira_transition_issue,
-    # jira_get_transitions, jira_get_issue
-  handoff_description: >-
-    Delegate to this agent when the ContosoMealsIncidentHandler has completed 
-    investigation and identified a known, pre-approved remediation pattern. This 
-    agent executes bounded write actions (pod restarts, memory scaling, Container App 
-    scaling, Cosmos DB RU/s increase, idle connection cleanup), validates the fix, 
-    and updates Jira. Does NOT handle unknown patterns — those are escalated to humans.
-  handoff_agents:
-    - ContosoMealsResilienceValidator
-  agent_type: Autonomous
-```
+> **YAML definition:** [`subagents/contoso-meals-auto-remediator.yaml`](../subagents/contoso-meals-auto-remediator.yaml)
+>
+> Paste the contents of that file into the **YAML tab** in Subagent Builder.
 
 ---
 

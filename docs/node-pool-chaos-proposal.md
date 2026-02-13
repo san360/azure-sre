@@ -210,15 +210,33 @@ kubectl get pods -n production -o wide
 
 ### Trigger Chaos
 ```bash
-# Start the node pool failure experiment
+# Full scenario: load test + chaos experiment + scale node pool to 0
 ./scripts/start-node-failure.sh
+
+# Chaos + scale only (skip load test)
+./scripts/start-node-failure.sh --no-load
+
+# Only chaos experiment (no load, no scale)
+./scripts/start-node-failure.sh --chaos-only
+
+# Only scale to 0 (no load, no chaos)
+./scripts/start-node-failure.sh --scale-only
+
+# Use a specific load test ID
+./scripts/start-node-failure.sh --test-id baseline
 ```
+
+By default the script starts an Azure Load Testing run (`lunch-rush` test) to generate
+traffic before injecting chaos, mirroring the pattern used in `start-lunch-rush.sh`.
+This ensures Application Insights has meaningful error-rate and latency data for the
+SRE Agent to reference during investigation.
 
 ### Monitor the SRE Agent Flow
 1. **Azure Portal → SRE Agent chat** — watch the agent receive the alert
 2. **Jira CONTOSO board** — ticket appears with investigation updates
 3. **AKS node view** — node disappears, then reappears after remediation
 4. **kubectl** — `kubectl get pods -n production -w` (watch pods go Pending → Running)
+5. **Azure Load Testing** — view live test run metrics alongside the chaos window
 
 ### Manual Restore (if SRE Agent doesn't auto-remediate)
 ```bash
@@ -235,9 +253,9 @@ kubectl get pods -n production -o wide
 
 **[Action]** Run `./scripts/start-node-failure.sh`
 
-**[Show]** Terminal output showing the scale-to-0 operation
+**[Show]** Terminal output showing the load test starting, then chaos injection, then the scale-to-0 operation
 
-**[Narrator]** "We've just scaled the workload node pool from 1 to 0 nodes. This is equivalent to a cloud provider zone failure or an accidental node pool deletion. All application pods are now unschedulable."
+**[Narrator]** "We've started a load test to generate realistic customer traffic, then injected chaos, and scaled the workload node pool from 1 to 0 nodes. This is equivalent to a cloud provider zone failure or an accidental node pool deletion during peak traffic. All application pods are now unschedulable — and the load test shows real order failures piling up."
 
 **[Show]** `kubectl get pods -n production` — pods in Pending state
 
@@ -257,7 +275,7 @@ kubectl get pods -n production -o wide
 
 **[Show]** `kubectl get pods -n production -w` — pods transition from Pending to Running
 
-**[Narrator]** "The agent has verified the recovery, posted the resolution summary to Jira, and closed the ticket. From detection to resolution — fully autonomous. The SRE on-call engineer received a clean incident report with root cause, business impact, and remediation details — without lifting a finger."
+**[Narrator]** "The agent has verified the recovery, posted the resolution summary to Jira, and closed the ticket. From detection to resolution — fully autonomous, fully hands-off. The SRE on-call engineer received a clean incident report with root cause, business impact quantified from the load test data, and remediation details — without lifting a finger."
 
 **[Show]** Final Jira ticket with complete incident lifecycle
 
@@ -269,7 +287,7 @@ kubectl get pods -n production -o wide
 |------|--------|-------------|
 | [infra/main.bicep](infra/main.bicep) | **Modified** | Added `workload` user node pool (1 node, manual scale) to AKS cluster; added `chaosNodePool` module reference |
 | [infra/modules/chaos-node-pool.bicep](infra/modules/chaos-node-pool.bicep) | **Created** | Chaos Studio experiment targeting workload node pool + RBAC roles |
-| [scripts/start-node-failure.sh](scripts/start-node-failure.sh) | **Created** | Script to trigger node pool failure (chaos + scale-to-0) and restore |
+| [scripts/start-node-failure.sh](scripts/start-node-failure.sh) | **Created** | Script to trigger node pool failure (load test + chaos + scale-to-0) and restore |
 | [scripts/setup-node-alerts.sh](scripts/setup-node-alerts.sh) | **Created** | Script to create/verify/delete node pool monitoring alerts |
 | [docs/node-pool-chaos-proposal.md](docs/node-pool-chaos-proposal.md) | **Created** | This proposal document |
 
@@ -281,7 +299,7 @@ kubectl get pods -n production -o wide
 |-----------|---------------------|----------------------|
 | **Failure level** | Application (pod) | Infrastructure (node) |
 | **Experiment** | `exp-contoso-meals-payment-incident` | `exp-contoso-meals-nodepool-failure` |
-| **Mechanism** | Chaos Mesh pod-kill/network delay | Scale node pool to 0 |
+| **Mechanism** | Chaos Mesh pod-kill/network delay | Load test + Chaos Mesh pod-kill + scale node pool to 0 |
 | **Blast radius** | Single service (payment-service) | All services on workload nodes |
 | **Self-healing** | Kubernetes restarts pods | No — manual scale required |
 | **SRE Agent action** | Investigate + report | Investigate + **remediate** + report |

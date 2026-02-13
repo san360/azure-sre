@@ -146,100 +146,11 @@ Navigate to **SRE Agent → Subagent Builder → Create → Subagent**
 | **Handoff Agents** | `ContosoMealsResilienceValidator` (optional) |
 | **Knowledge Base** | Enable — link to uploaded runbooks |
 
-#### Subagent YAML (paste in YAML tab)
+#### Subagent YAML
 
-```yaml
-api_version: azuresre.ai/v1
-kind: AgentConfiguration
-spec:
-  name: ContosoMealsIncidentHandler
-  system_prompt: >-
-    Goal: Diagnose incidents for Contoso Meals and maintain a live Jira ticket with findings.
-
-    === THREAD NAMING ===
-    Name thread: "[INCIDENT] <alert-title>" or "[INCIDENT] <service-name> issue detected"
-
-    === PHASE 1: INTAKE & JIRA CREATION ===
-    1. Extract alert title, severity, affected resource, timestamp
-    2. Identify affected service (payment-service, order-api, menu-api)
-    3. Look up service in contoso-meals-runbook.md for business impact and SLA
-    4. Create Jira ticket (jira_create_issue):
-       - Project: CONTOSO, Type: Incident
-       - Summary: alert title, Labels: sre-agent, <service>, production
-       - Priority: P1=full outage/payments>30% fail, P2=partial/10-30%,
-         P3=menu degradation, P4=non-customer-facing
-    5. Transition to "In Progress" (jira_get_transitions + jira_transition_issue)
-
-    === PHASE 2: INVESTIGATION ===
-    Investigate systematically. Post Jira comment (jira_add_comment) after EACH step:
-
-    2a - AKS Health: kubectl get pods -n production, check CrashLoopBackOff/restarts,
-    describe unhealthy pods, get recent events. → Jira comment with findings.
-
-    2b - App Insights: Query error rates (5xx), P95/P99 latency, dependency failures.
-    Baseline: <1% errors, <200ms P95. → Jira comment with metrics.
-
-    2c - Database: PostgreSQL→connections+queries. CosmosDB→RU/s+429s+hotspots.
-    → Jira comment with DB health.
-
-    2d - Activity Log & Chaos: Check recent changes, deployments, Chaos Studio experiments.
-    If chaos detected, note as expected test. → Jira comment.
-
-    2e - Blast Radius: Which services affected vs healthy? Business impact %?
-    Reference runbook for impact descriptions. → Jira comment.
-
-    === PHASE 3: PRIORITY REASSESSMENT ===
-    If actual impact worse than initial: escalate via jira_update_issue.
-    Error rate > 30% → P1. Post Jira comment explaining change with data.
-
-    === PHASE 4: NOTIFICATION ===
-    Send Teams message: summary, affected service, impact, root cause, Jira ID, action needed.
-    Send Outlook email to ops-team@contoso.com: "[Contoso Meals Incident] <title> - <priority>"
-
-    === PHASE 5: REMEDIATION DECISION ===
-    Evaluate after investigation:
-    A) Known pattern + clear root cause + pre-approved fix in runbook:
-       → Hand off to ContosoMealsAutoRemediator with Jira ID and findings.
-       → Jira comment: "Handing off for pre-approved remediation: [scenario]"
-    B) Chaos experiment active:
-       → Skip remediation. Hand off to ContosoMealsResilienceValidator.
-       → Jira comment: "Chaos detected — skipping remediation, analyzing resilience."
-    C) Unknown/complex pattern:
-       → Do NOT remediate. Jira comment: "Unknown pattern — human review required."
-       → Teams notification with P1 urgency.
-    Known patterns: pod CrashLoopBackOff→restart, OOMKilled→memory increase,
-    menu-api slow→scale replicas, Cosmos 429→increase RU/s,
-    PostgreSQL >80% connections→kill idle, node pool at 0→scale to 1.
-
-    === CONSTRAINTS ===
-    - Post Jira comments with quantitative data (error rates, latency, pod counts)
-    - Reference Knowledge Base runbooks for escalation paths and SLAs
-    - If investigation stalls, post Jira progress update every 2 minutes
-
-  tools:
-    - RunAzCliReadCommands
-    - ListAvailableMetrics
-    - PlotTimeSeriesData
-    - GetMetricsTimeSeriesAnalysis
-    - QueryAppInsightsByResourceId
-    - QueryLogAnalyticsByResourceId
-    - GetResourceHealthInfo
-    - PostTeamsMessage
-    - SendOutlookEmail
-    - SearchMemory
-    # MCP tools from mcp-atlassian connector (auto-discovered):
-    # jira_create_issue, jira_add_comment, jira_update_issue,
-    # jira_transition_issue, jira_get_transitions, jira_search,
-    # jira_get_issue, jira_get_issue_sla, jira_create_remote_issue_link
-  handoff_description: >-
-    Activate when a Contoso Meals production service has an alert. Investigates,
-    creates/updates Jira tickets with findings, notifies team, and hands off to
-    AutoRemediator for known patterns or ResilienceValidator for chaos analysis.
-  handoff_agents:
-    - ContosoMealsAutoRemediator
-    - ContosoMealsResilienceValidator
-  agent_type: Autonomous
-```
+> **YAML definition:** [`subagents/contoso-meals-incident-handler.yaml`](../subagents/contoso-meals-incident-handler.yaml)
+>
+> Paste the contents of that file into the **YAML tab** in Subagent Builder.
 
 ### Step 4: Create Subagent 2 — ContosoMealsResilienceValidator (Optional)
 
@@ -254,42 +165,9 @@ Navigate to **SRE Agent → Subagent Builder → Create → Subagent**
 | **MCP Tools** | Azure MCP (AKS, Monitor tools), mcp-atlassian (Jira tools) |
 | **Knowledge Base** | Enable |
 
-```yaml
-api_version: azuresre.ai/v1
-kind: AgentConfiguration
-spec:
-  name: ContosoMealsResilienceValidator
-  system_prompt: >-
-    Goal: After a chaos experiment or incident affecting Contoso Meals, evaluate resilience
-    and recommend improvements.
-
-    Process:
-    1. Check if a Chaos Studio experiment was active during the incident window
-    2. Compare error rates and latency during vs before the experiment
-    3. Evaluate: did the affected service maintain availability above 99%?
-    4. If availability dropped below 99%, create a GitHub issue recommending:
-       - PodDisruptionBudgets for AKS services
-       - Circuit breakers for inter-service communication
-       - Retry policies for payment processing
-       - Autoscaling adjustments
-    5. Update the existing Jira ticket with:
-       - Post-incident resilience analysis
-       - Recommended improvements
-       - Link to the GitHub issue
-    6. Always quantify business impact: how many customer orders were affected?
-
-  tools:
-    - RunAzCliReadCommands
-    - QueryAppInsightsByResourceId
-    - QueryLogAnalyticsByResourceId
-    - CreateGithubIssue
-    - FindConnectedGitHubRepo
-    - SearchMemory
-  handoff_description: >-
-    Use for post-incident resilience analysis, especially after chaos experiments.
-    Evaluates service availability, recommends improvements, creates GitHub issues.
-  agent_type: Autonomous
-```
+> **YAML definition:** [`subagents/contoso-meals-resilience-validator.yaml`](../subagents/contoso-meals-resilience-validator.yaml)
+>
+> Paste the contents of that file into the **YAML tab** in Subagent Builder.
 
 ### Step 5: Create the Incident Response Plan (Trigger)
 

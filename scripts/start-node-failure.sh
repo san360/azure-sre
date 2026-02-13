@@ -17,10 +17,12 @@ set -euo pipefail
 #   - Azure CLI authenticated with appropriate permissions
 #
 # Usage:
-#   ./scripts/start-node-failure.sh                  # full: chaos + scale to 0
-#   ./scripts/start-node-failure.sh --chaos-only     # only start chaos experiment
-#   ./scripts/start-node-failure.sh --scale-only     # only scale pool to 0
-#   ./scripts/start-node-failure.sh --restore         # restore pool to 1 node
+#   ./scripts/start-node-failure.sh                  # full: load + chaos + scale to 0
+#   ./scripts/start-node-failure.sh --chaos-only     # only start chaos experiment (no load, no scale)
+#   ./scripts/start-node-failure.sh --scale-only     # only scale pool to 0 (no load, no chaos)
+#   ./scripts/start-node-failure.sh --no-load        # chaos + scale but skip load test
+#   ./scripts/start-node-failure.sh --restore        # restore pool to 1 node
+#   ./scripts/start-node-failure.sh --test-id ID     # use a specific load test ID
 ###############################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,16 +32,20 @@ ENV_FILE="${PROJECT_ROOT}/.env"
 # Defaults
 SKIP_CHAOS=false
 SKIP_SCALE=false
+SKIP_LOAD=false
 RESTORE=false
 NODE_POOL_NAME="workload"
+LOAD_TEST_ID="lunch-rush"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --chaos-only) SKIP_SCALE=true; shift ;;
-    --scale-only) SKIP_CHAOS=true; shift ;;
+    --chaos-only) SKIP_SCALE=true; SKIP_LOAD=true; shift ;;
+    --scale-only) SKIP_CHAOS=true; SKIP_LOAD=true; shift ;;
+    --no-load)    SKIP_LOAD=true; shift ;;
     --restore)    RESTORE=true; shift ;;
     --pool-name)  NODE_POOL_NAME="$2"; shift 2 ;;
+    --test-id)    LOAD_TEST_ID="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
@@ -52,8 +58,11 @@ fi
 RESOURCE_GROUP="${RESOURCE_GROUP:-rg-contoso-meals}"
 AKS_CLUSTER="${AKS_CLUSTER:-aks-contoso-meals}"
 PREFIX="${PREFIX:-contoso-meals}"
+LOAD_TEST_RESOURCE="${LOAD_TEST_RESOURCE:-lt-contoso-meals}"
 EXPERIMENT_NAME="exp-${PREFIX}-nodepool-failure"
+TEST_RUN_ID="nodepool-failure-$(date +%Y%m%d-%H%M%S)"
 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+LOAD_TEST_RUNNING=false
 
 echo ""
 echo "╔═══════════════════════════════════════════════════════════╗"
@@ -64,6 +73,7 @@ echo "  AKS Cluster:    ${AKS_CLUSTER}"
 echo "  Resource Group:  ${RESOURCE_GROUP}"
 echo "  Node Pool:       ${NODE_POOL_NAME}"
 echo "  Experiment:      ${EXPERIMENT_NAME}"
+echo "  Load Test:       ${LOAD_TEST_ID} (skip=${SKIP_LOAD})"
 echo ""
 
 # ─── Restore Mode ──────────────────────────────────────────────────
@@ -133,6 +143,22 @@ echo "  Pods on workload nodes:"
 kubectl get pods -n production -o wide 2>/dev/null | grep -i "workload\|NAME" | sed 's/^/    /' || echo "    (no pods found on workload nodes)"
 echo ""
 
+# Check load test resource
+if [ "$SKIP_LOAD" = false ]; then
+  echo -n "  Azure Load Test: "
+  LT_EXISTS=$(az load test show \
+    --load-test-resource "$LOAD_TEST_RESOURCE" \
+    --resource-group "$RESOURCE_GROUP" \
+    --test-id "$LOAD_TEST_ID" \
+    --query "testId" -o tsv 2>/dev/null || echo "")
+  if [ -n "$LT_EXISTS" ]; then
+    echo "found (${LOAD_TEST_ID} in ${LOAD_TEST_RESOURCE})"
+  else
+    echo "NOT FOUND — will skip load test"
+    SKIP_LOAD=true
+  fi
+fi
+
 if [ "$SKIP_CHAOS" = false ]; then
   echo -n "  Chaos experiment: "
   EXP_EXISTS=$(az rest \
@@ -147,6 +173,47 @@ if [ "$SKIP_CHAOS" = false ]; then
   fi
 fi
 echo ""
+
+# ─── Step 0: Start Azure Load Testing run ────────────────────────────
+if [ "$SKIP_LOAD" = false ]; then
+  echo "━━━ Starting Azure Load Testing run ━━━"
+  echo "  Resource:  ${LOAD_TEST_RESOURCE}"
+  echo "  Test:      ${LOAD_TEST_ID}"
+  echo "  Run ID:    ${TEST_RUN_ID}"
+  echo ""
+
+  az load test-run create \
+    --load-test-resource "$LOAD_TEST_RESOURCE" \
+    --resource-group "$RESOURCE_GROUP" \
+    --test-id "$LOAD_TEST_ID" \
+    --test-run-id "$TEST_RUN_ID" \
+    --display-name "Node Pool Failure - Load $(date +%H:%M)" \
+    --description "Load test triggered by start-node-failure.sh during node pool chaos" \
+    --no-wait \
+    --only-show-errors -o none 2>&1 || {
+      echo "  WARNING: Failed to start load test run. Continuing without load..."
+    }
+
+  LOAD_TEST_RUNNING=true
+  echo "  ✓ Load test run started (async)"
+
+  echo -n "  Waiting for test to start executing"
+  for i in $(seq 1 20); do
+    LT_STATUS=$(az load test-run show \
+      --load-test-resource "$LOAD_TEST_RESOURCE" \
+      --resource-group "$RESOURCE_GROUP" \
+      --test-run-id "$TEST_RUN_ID" \
+      --query "status" -o tsv 2>/dev/null || echo "UNKNOWN")
+    if [ "$LT_STATUS" = "EXECUTING" ] || [ "$LT_STATUS" = "DONE" ] || [ "$LT_STATUS" = "FAILED" ]; then
+      echo ""
+      echo "  Load test status: ${LT_STATUS}"
+      break
+    fi
+    echo -n "."
+    sleep 10
+  done
+  echo ""
+fi
 
 # ─── Step 1: Start Chaos Studio experiment ──────────────────────────
 if [ "$SKIP_CHAOS" = false ]; then
@@ -212,3 +279,39 @@ echo "  Restore (manual):"
 echo "    ./scripts/start-node-failure.sh --restore"
 echo "    # OR: az aks nodepool scale -g ${RESOURCE_GROUP} --cluster-name ${AKS_CLUSTER} -n ${NODE_POOL_NAME} --node-count 1"
 echo ""
+
+# ─── Load test summary ───────────────────────────────────────────────
+if [ "$LOAD_TEST_RUNNING" = true ]; then
+  echo "━━━ Azure Load Test Summary ━━━"
+  echo "  Run ID: ${TEST_RUN_ID}"
+  LT_FINAL=$(az load test-run show \
+    --load-test-resource "$LOAD_TEST_RESOURCE" \
+    --resource-group "$RESOURCE_GROUP" \
+    --test-run-id "$TEST_RUN_ID" \
+    --query "{status:status, vUsers:virtualUsers, startTime:startDateTime, endTime:endDateTime}" \
+    -o table 2>/dev/null || echo "  Could not fetch test run status")
+  echo "$LT_FINAL" | sed 's/^/    /'
+  echo ""
+  echo "  View results: Azure Portal → Load Testing → ${LOAD_TEST_RESOURCE} → Test runs → ${TEST_RUN_ID}"
+  echo ""
+fi
+
+# Cleanup trap — stop load test on script exit if still running
+cleanup() {
+  if [ "$LOAD_TEST_RUNNING" = true ]; then
+    LT_STATUS=$(az load test-run show \
+      --load-test-resource "$LOAD_TEST_RESOURCE" \
+      --resource-group "$RESOURCE_GROUP" \
+      --test-run-id "$TEST_RUN_ID" \
+      --query "status" -o tsv 2>/dev/null || echo "DONE")
+    if [ "$LT_STATUS" = "EXECUTING" ] || [ "$LT_STATUS" = "PROVISIONING" ] || [ "$LT_STATUS" = "CONFIGURING" ]; then
+      echo "Stopping load test run (${TEST_RUN_ID})..."
+      az load test-run stop \
+        --load-test-resource "$LOAD_TEST_RESOURCE" \
+        --resource-group "$RESOURCE_GROUP" \
+        --test-run-id "$TEST_RUN_ID" \
+        --only-show-errors -o none 2>/dev/null || true
+    fi
+  fi
+}
+trap cleanup EXIT
