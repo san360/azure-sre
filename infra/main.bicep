@@ -105,6 +105,8 @@ module appInsights 'br/public:avm/res/insights/component:0.4.2' = {
 }
 
 // AKS Cluster — hosts order-api and payment-service (AVM)
+// System pool: infrastructure workloads (2 nodes)
+// User pool (workload): application workloads (1 node, manual scale) — chaos target
 module aks 'br/public:avm/res/container-service/managed-cluster:0.12.0' = {
   scope: rg
   name: 'aks-cluster'
@@ -117,6 +119,25 @@ module aks 'br/public:avm/res/container-service/managed-cluster:0.12.0' = {
         count: 2
         vmSize: 'Standard_B2s'
         mode: 'System'
+        nodeTaints: [
+          'CriticalAddonsOnly=true:NoSchedule'
+        ]
+      }
+    ]
+    agentPools: [
+      {
+        name: 'workload'
+        count: 1
+        vmSize: 'Standard_B2s'
+        mode: 'User'
+        osType: 'Linux'
+        enableAutoScaling: false
+        minCount: null
+        maxCount: null
+        nodeTaints: []
+        nodeLabels: {
+          'workload-type': 'application'
+        }
       }
     ]
     managedIdentities: {
@@ -485,10 +506,22 @@ module workbook './modules/workbooks.bicep' = {
   }
 }
 
-// Chaos Studio (optional)
+// Chaos Studio (optional) — payment-service pod/network chaos
 module chaos './modules/chaos.bicep' = if (enableChaos) {
   scope: rg
   name: 'chaos-studio'
+  params: {
+    aksClusterName: aks.outputs.name
+    prefix: prefix
+    tags: tags
+  }
+}
+
+// Chaos Studio — AKS user node pool failure experiment
+// Scales the 'workload' user node pool to 0 / kills all nodes to simulate node failure
+module chaosNodePool './modules/chaos-node-pool.bicep' = if (enableChaos) {
+  scope: rg
+  name: 'chaos-nodepool'
   params: {
     aksClusterName: aks.outputs.name
     prefix: prefix

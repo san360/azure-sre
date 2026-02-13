@@ -17,6 +17,8 @@ spec:
         app: order-api
         app.kubernetes.io/part-of: contoso-meals
     spec:
+      nodeSelector:
+        workload-type: application
       containers:
         - name: order-api
           image: ${ACR_NAME}.azurecr.io/contoso-meals/order-api:latest

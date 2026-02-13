@@ -5,20 +5,39 @@
 ### Connection Details
 - **Jira Instance:** `jira-sm` Container App in `rg-contoso-meals`
 - **MCP Bridge:** `mcp-atlassian` Container App, port 9000, endpoint `/mcp`
+- **Project Name:** Contoso Meals Operations
 - **Project Key:** CONTOSO
-- **Issue Type for Incidents:** Incident
+- **Issue Type for Incidents:** Task
+- **Available Fields:** Summary (required), Description, Priority, Attachment
 
 ### Incident Creation Guidelines
 When creating a Jira incident ticket via the SRE Agent:
 1. **Summary:** Clear, actionable title describing the issue (e.g., "Payment-service pod failures causing order checkout errors")
-2. **Priority:** Set based on business impact analysis:
-   - **P1 (Critical):** Full outage — customers cannot place orders (order-api down)
-   - **P1 (Critical):** Payment failures > 30% during peak traffic
-   - **P2 (High):** Partial degradation — payments intermittently failing, error rate 10-30%
-   - **P3 (Medium):** Menu browsing degraded — Cosmos DB throttling, menu-api latency
-   - **P4 (Low):** Non-customer-facing issues — log ingestion delays, metric gaps
+2. **Priority:** Set based on business impact analysis using Jira priority values:
+   - **Blocker:** Complete system outage — all services down, no customer transactions possible
+   - **Highest:** Full outage — customers cannot place orders (order-api down) or payment failures > 30% during peak traffic
+   - **High:** Partial degradation — payments intermittently failing, error rate 10-30%
+   - **Medium:** Menu browsing degraded — Cosmos DB throttling, menu-api latency
+   - **Low:** Non-customer-facing issues — log ingestion delays, metric gaps
+   - **Lowest:** Cosmetic or informational items — minor log warnings, non-impacting alerts
+   - **Minor:** Improvement suggestions from post-incident reviews, technical debt items
 3. **Labels:** Always include `sre-agent`, the affected service name (e.g., `payment-service`), and `production`
 4. **Description:** Include investigation findings, error rates, affected pods, timeline, and root cause
+
+### Ticket Assignment
+Assign tickets to the service owner based on the affected component:
+
+| Service | Assignee | Jira Username |
+|---------|----------|---------------|
+| payment-service | Alana Grant | `agrant-sd-demo` |
+| order-api | Jennifer Evans | `jevans-sd-demo` |
+| menu-api | Mitch Davis | `mdavis-sd-demo` |
+| PostgreSQL / database | Ryan Lee | `rlee-sd-demo` |
+| AKS node pool / infra | Vincent Wong | `vwong-sd-demo` |
+
+- Use `jira_assign_issue` with the Jira username (e.g., `agrant-sd-demo`) after ticket creation
+- If multiple services are affected, assign to the primary impacted service owner
+- For cross-cutting issues, assign to Vincent Wong (infra) and mention others in comments
 
 ### Investigation Work Notes
 While investigating, post findings as Jira comments in real time:
@@ -39,8 +58,10 @@ While investigating, post findings as Jira comments in real time:
 
 ### SLA Tracking
 - Use `jira_get_issue_sla` to check SLA compliance
-- P1 incidents: 15-minute response SLA
-- P2 incidents: 30-minute response SLA
+- **Blocker / Highest** incidents: 15-minute response SLA
+- **High** incidents: 30-minute response SLA
+- **Medium** incidents: 1-hour response SLA
+- **Low / Lowest / Minor** incidents: Best-effort response
 - Track cycle time from creation to resolution
 
 ### Cross-Incident Pattern Analysis

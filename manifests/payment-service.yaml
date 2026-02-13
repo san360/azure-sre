@@ -17,6 +17,8 @@ spec:
         app: payment-service
         app.kubernetes.io/part-of: contoso-meals
     spec:
+      nodeSelector:
+        workload-type: application
       containers:
         - name: payment-service
           image: ${ACR_NAME}.azurecr.io/contoso-meals/payment-service:latest
