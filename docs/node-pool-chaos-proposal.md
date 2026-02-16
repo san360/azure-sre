@@ -52,23 +52,25 @@ AKS Cluster (aks-contoso-meals)
 | **Recovery** | `az aks nodepool scale --node-count 1` (SRE Agent or manual) |
 
 ### Failure Cascade
-```
-1. Chaos experiment starts
-   └─→ Pod-kill on workload nodes (Chaos Mesh)
-
-2. Node pool scaled to 0
-   └─→ All workload VMs deallocated
-   └─→ Pods evicted → enter Pending state
-   └─→ Kubernetes events: FailedScheduling, Unschedulable
-
-3. Azure Monitor alerts fire (within 1-2 min)
-   ├─→ Node NotReady alert (Sev 1)
-   ├─→ Node pool count = 0 alert (Sev 0, Critical)
-   ├─→ Pod unschedulable alert (Sev 1)
-   └─→ Metric alert: node_count < 1 (Sev 0)
-
-4. SRE Agent receives alerts
-   └─→ Begins autonomous investigation flow
+```mermaid
+graph TD
+    A["1. Chaos Experiment Starts"] -->|Pod-kill| B["Workload Nodes (Chaos Mesh)"]
+    B --> C["2. Node Pool Scaled to 0"]
+    C --> D["All Workload VMs Deallocated"]
+    C --> E["Pods Evicted → Pending State"]
+    C --> F["K8s Events: FailedScheduling, Unschedulable"]
+    D --> G["3. Azure Monitor Alerts Fire (1-2 min)"]
+    E --> G
+    F --> G
+    G --> H["Node NotReady Alert (Sev 1)"]
+    G --> I["Node Pool Count = 0 Alert (Sev 0, Critical)"]
+    G --> J["Pod Unschedulable Alert (Sev 1)"]
+    G --> K["Metric Alert: node_count < 1 (Sev 0)"]
+    H --> L["4. SRE Agent Receives Alerts"]
+    I --> L
+    J --> L
+    K --> L
+    L --> M["Begins Autonomous Investigation Flow"]
 ```
 
 ---

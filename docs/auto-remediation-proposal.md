@@ -35,44 +35,19 @@ This proposal adds a **Part 5: Auto-Remediation** capability where the SRE Agent
 
 Following the [context engineering lessons](https://techcommunity.microsoft.com/blog/appsonazureblog/context-engineering-lessons-from-building-azure-sre-agent/4481200) from the Azure SRE Agent team, we use a **three-subagent handoff chain** (maximum practical limit before quality degrades):
 
-```
-Azure Monitor Alert fires
-         │
-         ▼
-  ┌──────────────────────────────────────────────────┐
-  │  Incident Response Plan (Trigger)                │
-  │  Platform: Azure Monitor                         │
-  │  Filter: Sev 0-2, resources in rg-contoso-meals  │
-  │  Mode: Autonomous                                │
-  └──────────────────┬───────────────────────────────┘
-                     │
-                     ▼
-  ┌──────────────────────────────────────────────────┐
-  │  Subagent 1: ContosoMealsIncidentHandler         │  ← EXISTS (from incident-response-plan)
-  │  (Investigation → Jira → Notify)                 │
-  │                                                  │
-  │  Phases 1-5: Investigate, create Jira, notify    │
-  │  Phase 6: NEW — Evaluate remediation eligibility │
-  │           Handoff to AutoRemediator OR            │
-  │           ResilienceValidator                     │
-  └──────────────────┬───────────────────────────────┘
-                     │
-          ┌──────────┴──────────┐
-          │                     │
-          ▼                     ▼
-  ┌────────────────────┐  ┌────────────────────────────┐
-  │  Subagent 2a:      │  │  Subagent 2b:              │  ← EXISTS
-  │  ContosoMeals      │  │  ContosoMeals              │
-  │  AutoRemediator    │  │  ResilienceValidator        │
-  │  ★ NEW             │  │  (post-incident analysis)   │
-  │                    │  └────────────────────────────┘
-  │  - Execute pre-    │
-  │    approved actions│
-  │  - Validate fix    │
-  │  - Update Jira     │
-  │  - Handoff to      │
-  │    ResilienceVal   │
-  └────────────────────┘
+```mermaid
+graph TD
+    ALERT["Azure Monitor Alert fires"] --> TRIGGER
+
+    TRIGGER["Incident Response Plan (Trigger)<br/>Platform: Azure Monitor<br/>Filter: Sev 0-2, rg-contoso-meals<br/>Mode: Autonomous"]
+    
+    TRIGGER --> S1["Subagent 1: ContosoMealsIncidentHandler<br/>(Investigation → Jira → Notify)<br/>Phases 1-5: Investigate, create Jira, notify<br/>Phase 6: Evaluate remediation eligibility"]
+    
+    S1 -->|"Known pattern +<br/>pre-approved fix"| S2A["Subagent 2a: ContosoMeals<br/>AutoRemediator ★ NEW<br/>- Execute pre-approved actions<br/>- Validate fix<br/>- Update Jira<br/>- Handoff to ResilienceValidator"]
+    
+    S1 -->|"Chaos experiment<br/>detected"| S2B["Subagent 2b: ContosoMeals<br/>ResilienceValidator<br/>(post-incident analysis)"]
+    
+    S2A --> S2B
 ```
 
 ### When Does Auto-Remediation Activate?
@@ -498,37 +473,17 @@ resource postgresConnectionAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = 
 
 ### 8.1 Defense in Depth
 
-```
-Layer 1: Azure RBAC
-  └── Managed identity has Contributor on rg-contoso-meals ONLY
-      (cannot touch other resource groups)
+```mermaid
+graph TD
+    L1["Layer 1: Azure RBAC<br/>Managed identity has Contributor<br/>on rg-contoso-meals ONLY"]
+    L2["Layer 2: SRE Agent Access Level<br/>High = Contributor + Reader +<br/>Log Analytics Reader (no Owner)"]
+    L3["Layer 3: Subagent Instructions (YAML)<br/>Explicit approved/forbidden actions lists<br/>Pattern-matching before any write action"]
+    L4["Layer 4: Runbook Knowledge Base<br/>Cross-references runbook for thresholds<br/>If action not in runbook → escalate"]
+    L5["Layer 5: Pre-Remediation Checks<br/>No chaos running, no deployment in progress<br/>Root cause confirmed + matches known pattern"]
+    L6["Layer 6: Post-Remediation Validation<br/>Verify fix worked (error rate < 5%)<br/>If validation fails → escalate after 2 attempts"]
+    L7["Layer 7: Audit Trail<br/>Every action logged as Jira comment<br/>Teams notifications + Azure Activity Log"]
 
-Layer 2: SRE Agent Access Level
-  └── High = Contributor + Reader + Log Analytics Reader
-      (no Owner, no User Access Administrator)
-
-Layer 3: Subagent Instructions (YAML)
-  └── Explicit approved actions list with ceilings
-      Explicit forbidden actions list
-      Pattern-matching required before any write action
-
-Layer 4: Runbook Knowledge Base
-  └── Agent cross-references runbook for approval thresholds
-      If action not in runbook → escalate
-
-Layer 5: Pre-Remediation Checks
-  └── No chaos experiment running
-      No deployment in progress
-      Root cause confirmed and matches known pattern
-
-Layer 6: Post-Remediation Validation
-  └── Must verify fix worked (error rate < 5%, resources healthy)
-      If validation fails → escalate after 2 attempts
-
-Layer 7: Audit Trail
-  └── Every action logged as Jira comment with timestamp
-      Teams notifications for all remediation attempts
-      Azure Activity Log captures all write operations
+    L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
 ```
 
 ### 8.2 Rollback Strategy
@@ -555,25 +510,36 @@ Layer 7: Audit Trail
 
 ### Timeline: Payment-Service Pod Failure During Lunch Rush
 
-```
-                Investigation Only                    Auto-Remediation
-                ──────────────────                    ─────────────────
-T+0:00    Alert fires                            Alert fires
-T+0:30    SRE Agent starts investigating         SRE Agent starts investigating
-T+1:30    Investigation complete                 Investigation complete
-T+1:45    Jira ticket created                    Jira ticket created
-T+2:00    Teams notification sent                Pattern match → handoff to remediator
-T+2:15    Human reads Teams message              Agent executes: kubectl rollout restart
-T+5:00    Human opens Azure Portal               Agent waits 60s for stabilization
-T+8:00    Human identifies the issue             Agent validates: error rate 0.3% ✓
-T+10:00   Human runs kubectl restart             Agent resolves Jira ticket
-T+12:00   Human verifies fix                     Agent notifies Teams ✅
-T+15:00   Human updates Jira
-T+20:00   Jira resolved manually                 Resilience analysis → GitHub issue
+```mermaid
+gantt
+    title Payment-Service Pod Failure: Investigation Only vs Auto-Remediation
+    dateFormat  mm:ss
+    axisFormat  %M:%S
 
-MTTR:     ~20 minutes                            ~3 minutes
-Orders    ~600 orders failed (20 min × 0.5/sec)  ~90 orders failed (3 min × 0.5/sec)
-lost:
+    section Investigation Only (MTTR ~20 min)
+    Alert fires                        :a1, 00:00, 30s
+    SRE Agent investigates             :a2, after a1, 60s
+    Investigation complete             :a3, after a2, 15s
+    Jira ticket created                :a4, after a3, 15s
+    Teams notification sent            :a5, after a4, 15s
+    Human reads message                :a6, after a5, 165s
+    Human opens Azure Portal           :a7, after a6, 180s
+    Human identifies issue             :a8, after a7, 120s
+    Human runs kubectl restart         :a9, after a8, 120s
+    Human verifies fix                 :a10, after a9, 180s
+    Jira resolved manually             :a11, after a10, 300s
+
+    section Auto-Remediation (MTTR ~3 min)
+    Alert fires                             :b1, 00:00, 30s
+    SRE Agent investigates                  :b2, after b1, 60s
+    Investigation complete                  :b3, after b2, 15s
+    Jira ticket created                     :b4, after b3, 15s
+    Pattern match → handoff to remediator   :b5, after b4, 15s
+    Agent executes kubectl rollout restart  :b6, after b5, 15s
+    Agent waits for stabilization           :b7, after b6, 60s
+    Agent validates error rate 0.3%         :b8, after b7, 10s
+    Agent resolves Jira ticket              :b9, after b8, 10s
+    Resilience analysis → GitHub issue      :b10, after b9, 10s
 ```
 
 ### Business Impact Reduction

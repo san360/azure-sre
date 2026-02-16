@@ -33,31 +33,15 @@
 
 ### Architecture Flow
 
-```
-Customer (Browser)
-    │
-    ▼
-┌──────────┐
-│  web-ui  │ ──── React SPA (Container App)
-└──────────┘
-    │
-    ├── GET /restaurants, GET /menus/{id}
-    │       ▼
-    │   ┌──────────┐
-    │   │ menu-api  │ ──► Cosmos DB (catalogdb)
-    │   └──────────┘
-    │
-    ├── POST /orders, GET /orders/{id}
-    │       ▼
-    │   ┌──────────┐
-    │   │ order-api │ ──► PostgreSQL (ordersdb)
-    │   └──────────┘
-    │
-    └── POST /pay (called by order-api or directly)
-            ▼
-        ┌─────────────────┐
-        │ payment-service  │ ──► PostgreSQL (ordersdb)
-        └─────────────────┘
+```mermaid
+graph TD
+    CUST["Customer (Browser)"] --> UI["web-ui<br/>React SPA (Container App)"]
+    
+    UI -->|"GET /restaurants<br/>GET /menus/{id}"| MENU["menu-api"] --> CDB["Cosmos DB (catalogdb)"]
+    
+    UI -->|"POST /orders<br/>GET /orders/{id}"| OA["order-api"] --> PG["PostgreSQL (ordersdb)"]
+    
+    UI -->|"POST /pay<br/>(called by order-api or directly)"| PS["payment-service"] --> PG2["PostgreSQL (ordersdb)"]
 ```
 
 ---

@@ -6,47 +6,35 @@ The Contoso Meals platform is a cloud-native food ordering system deployed on Az
 
 ### Architecture Diagram
 
-```
-                    Azure Load Testing
-                    (simulated customers)
-                           │
-                           ▼
-          ┌────────────────┬────────────────────────────────┐
-          │                │                                │
-    ┌─────▼──────┐  ┌─────▼──────────────────────────┐     │
-    │  menu-api  │  │     AKS Cluster (aks-contoso-   │     │
-    │ (Container │  │               meals)             │     │
-    │   App)     │  │  ┌───────────┐ ┌──────────────┐ │     │
-    │            │  │  │ order-api │ │payment-service│ │     │
-    │  GET /     │  │  │ POST /    │ │ POST /pay    │ │     │
-    │  restaurants│  │  │ orders   │ │ (fault-      │ │     │
-    │  GET /menus│  │  │          │ │  injectable) │ │     │
-    │     │      │  │  └────┬─────┘ └──────┬───────┘ │     │
-    │     ▼      │  │       │              │         │     │
-    │ Cosmos DB  │  │       └──────┬───────┘         │     │
-    │ (catalogdb)│  │              │                  │     │
-    └────────────┘  │              ▼                  │     │
-                    │       PostgreSQL                │     │
-                    │       (ordersdb)                │     │
-                    └────────────────────────────────┘     │
-                                   │                       │
-                    ┌──────────────┼──────────────┐        │
-                    │              │              │        │
-                Key Vault    Azure Monitor  Chaos Studio   │
-               (secrets)   (metrics, alerts) (experiments) │
-                                   │                       │
-                            Azure SRE Agent                │
-                         (connected via MCP)                │
-                                   │                       │
-                    ┌──────────────┼──────────────┐        │
-                    │              │              │        │
-               mcp-atlassian   Teams         Knowledge     │
-              (Container App) Connector       Base         │
-                    │                                      │
-                Jira SM                                    │
-              (Container App)                              │
-                    │                                      │
-                PostgreSQL (jiradb)                        │
+```mermaid
+graph TD
+    ALT["Azure Load Testing<br/>(simulated customers)"] --> MENU
+    ALT --> AKS
+    ALT --> CHAOS
+
+    MENU["menu-api<br/>(Container App)<br/>GET /restaurants<br/>GET /menus"] --> CDB["Cosmos DB<br/>(catalogdb)"]
+
+    subgraph AKS["AKS Cluster (aks-contoso-meals)"]
+        OA["order-api<br/>POST /orders"]
+        PS["payment-service<br/>POST /pay<br/>(fault-injectable)"]
+        OA --- PS
+    end
+
+    OA --> PG["PostgreSQL<br/>(ordersdb)"]
+    PS --> PG
+
+    PG --> KV["Key Vault<br/>(secrets)"]
+    PG --> MON["Azure Monitor<br/>(metrics, alerts)"]
+    AKS --> CHAOS["Chaos Studio<br/>(experiments)"]
+
+    MON --> SRE["Azure SRE Agent<br/>(connected via MCP)"]
+
+    SRE --> MCPA["mcp-atlassian<br/>(Container App)"]
+    SRE --> TEAMS["Teams Connector"]
+    SRE --> KB["Knowledge Base"]
+
+    MCPA --> JIRA["Jira SM<br/>(Container App)"]
+    JIRA --> JIRADB["PostgreSQL (jiradb)"]
 ```
 
 ### Service Details
@@ -72,6 +60,134 @@ The Contoso Meals platform is a cloud-native food ordering system deployed on Az
 | Load Testing | Standard | Sweden Central | Baseline + chaos load tests |
 | Storage Account | Standard_LRS | Sweden Central | Jira home directory (Azure Files) |
 | Chaos Studio | N/A | Sweden Central | Pod kill experiments |
+
+### SRE Agent Configuration
+
+The Azure SRE Agent (`Microsoft.App/agents@2025-05-01-preview`) is the autonomous operations layer. It connects to Azure resources via MCP (Model Context Protocol) servers, uses a knowledge base for runbooks, and orchestrates work through a subagent handoff chain.
+
+#### Tool Connectors
+
+```mermaid
+graph LR
+    SRE["Azure SRE Agent<br/>(contoso-meals-sre)"]
+
+    subgraph AzureMCP["Azure MCP Server (42+ tools)"]
+        direction TB
+        READ["RunAzCliReadCommands<br/>RunAzCliWriteCommands"]
+        METRICS["ListAvailableMetrics<br/>GetMetricsTimeSeriesAnalysis<br/>PlotTimeSeriesData"]
+        TELEMETRY["QueryAppInsightsByResourceId<br/>QueryLogAnalyticsByResourceId"]
+        HEALTH["GetResourceHealthInfo"]
+    end
+
+    subgraph JiraMCP["mcp-atlassian MCP Server (34 tools)"]
+        direction TB
+        JCREATE["jira_create_issue<br/>jira_update_issue"]
+        JFLOW["jira_transition_issue<br/>jira_add_comment"]
+        JQUERY["jira_search<br/>jira_get_issue"]
+    end
+
+    subgraph BuiltIn["Built-in Capabilities"]
+        direction TB
+        TEAMS["PostTeamsMessage"]
+        EMAIL["SendOutlookEmail"]
+        MEMORY["SearchMemory<br/>(Knowledge Base)"]
+        GH["CreateGithubIssue<br/>FindConnectedGitHubRepo"]
+        SCHED["CreateScheduledMonitoringTask"]
+    end
+
+    SRE --> AzureMCP
+    SRE --> JiraMCP
+    SRE --> BuiltIn
+```
+
+| Connector | Type | Endpoint | Identity | Tools |
+|-----------|------|----------|----------|-------|
+| Azure MCP Server | MCP (streamable-http) | Built-in Azure integration | `id-contoso-meals-sre-agent` (User-Assigned MI) | 42+ Azure CLI, metrics, telemetry, health |
+| mcp-atlassian | MCP (streamable-http) | `mcp-atlassian.*.azurecontainerapps.io:9000` | API token (Jira admin) | 34 Jira CRUD, workflow, search tools |
+| Teams | Built-in | Microsoft Graph | Agent system identity | Post messages to channels |
+| Outlook | Built-in | Microsoft Graph | Agent system identity | Send email notifications |
+| Knowledge Base | Built-in | Agent memory store | Agent system identity | Semantic search over runbooks |
+
+#### Subagent Handoff Architecture
+
+The SRE Agent delegates work to specialized subagents via a handoff chain. Each subagent has a scoped set of tools and a focused system prompt.
+
+```mermaid
+graph TD
+    ALERT["Azure Monitor Alert<br/>(Action Group: ag-contoso-meals-sre)"] -->|triggers| SRE["Azure SRE Agent"]
+    SRE -->|delegates to| IH["ContosoMealsIncidentHandler"]
+
+    IH -->|"Phase 1: Intake"| ACK["Acknowledge Alert<br/>(RunAzCliWriteCommands)"]
+    IH -->|"Phase 2: Investigate"| INV["Query App Insights + AKS logs<br/>Check dependencies + activity logs"]
+    IH -->|"Phase 3: Assess"| ASSESS["Determine severity<br/>(P1 if error rate > 30%)"]
+    IH -->|"Phase 4: ITSM"| JIRA["Create Jira P1 ticket<br/>Assign to service owner<br/>Send email notification"]
+
+    IH -->|"Known failure pattern"| AR["ContosoMealsAutoRemediator"]
+    IH -->|"Chaos experiment active"| RV["ContosoMealsResilienceValidator"]
+    IH -->|"Unknown pattern"| HUMAN["Escalate to Human<br/>(Jira comment + Teams)"]
+
+    AR -->|"Execute fix + validate"| ARFIX["Pre-approved Actions:<br/>• Restart AKS deployments<br/>• Scale memory to 512Mi<br/>• Scale menu-api replicas<br/>• Increase Cosmos RU/s to 1000<br/>• Scale node pool (0-3 nodes)<br/>• Terminate idle PG connections"]
+    AR -->|"Fix validated"| RV
+    AR -->|"Fix failed (2 retries)"| HUMAN
+
+    RV -->|"Analyze resilience"| RVCHECK["Compare error rates vs baseline<br/>Evaluate availability (< 99%?)"]
+    RV -->|"Improvements needed"| GHISSUE["Create GitHub Issue<br/>(PDBs, circuit breakers, retries)"]
+    RV -->|"Close incident"| CLOSE["Update Jira → Closed"]
+
+    style IH fill:#4a90d9,color:#fff
+    style AR fill:#e67e22,color:#fff
+    style RV fill:#27ae60,color:#fff
+    style HUMAN fill:#c0392b,color:#fff
+```
+
+#### Subagent Details
+
+| Subagent | Role | Azure Tools | Jira Tools | Handoffs To | Mode |
+|----------|------|-------------|------------|-------------|------|
+| **ContosoMealsIncidentHandler** | Diagnose incidents, create ITSM tickets | `RunAzCliReadCommands`, `RunAzCliWriteCommands`, `QueryAppInsightsByResourceId`, `QueryLogAnalyticsByResourceId`, `SearchMemory` | `jira_create_issue`, `jira_update_issue`, `jira_transition_issue`, `jira_add_comment` | AutoRemediator, ResilienceValidator | Autonomous |
+| **ContosoMealsAutoRemediator** | Execute pre-approved fixes | `RunAzCliReadCommands`, `RunAzCliWriteCommands`, `GetResourceHealthInfo`, `CreateScheduledMonitoringTask` | `jira_add_comment`, `jira_transition_issue` + 30 more | ResilienceValidator | Autonomous |
+| **ContosoMealsResilienceValidator** | Post-incident resilience analysis | `RunAzCliReadCommands`, `QueryAppInsightsByResourceId`, `QueryLogAnalyticsByResourceId`, `CreateGithubIssue` | `jira_add_comment`, `jira_transition_issue` | — (terminal) | Autonomous |
+| **ContosoMealsHealthCheck** | Scheduled 24h anomaly detection | `RunAzCliReadCommands`, `GetMultipleTimeSeries`, `GetTimeSeriesAnalysis`, `QueryAppInsightsByResourceId` | — | — (standalone) | Autonomous |
+
+#### Incident Lifecycle Flow
+
+```mermaid
+sequenceDiagram
+    participant AM as Azure Monitor
+    participant SRE as SRE Agent
+    participant IH as IncidentHandler
+    participant JIRA as Jira SM
+    participant AR as AutoRemediator
+    participant RV as ResilienceValidator
+    participant GH as GitHub
+
+    AM->>SRE: Alert fires (Action Group)
+    SRE->>IH: Delegate incident
+    IH->>AM: Acknowledge alert (PATCH)
+    IH->>IH: Investigate (App Insights, AKS logs, activity logs)
+    IH->>JIRA: Create P1 issue (CONTOSO-XX)
+    IH->>JIRA: Assign to service owner
+    IH->>JIRA: Transition → In Progress
+
+    alt Known failure pattern
+        IH->>AR: Handoff with Jira key
+        AR->>AR: Pre-check (no chaos, no rollout)
+        AR->>AR: Execute fix (restart / scale / RU bump)
+        AR->>AR: Validate (error rate < 5%)
+        AR->>JIRA: Add remediation log comment
+        AR->>JIRA: Transition → Resolved
+        AR->>RV: Handoff for resilience analysis
+    else Chaos experiment active
+        IH->>RV: Handoff directly
+    end
+
+    RV->>RV: Compare metrics (during vs before)
+    RV->>JIRA: Add resilience analysis comment
+    alt Availability < 99%
+        RV->>GH: Create improvement issue
+    end
+    RV->>JIRA: Transition → Closed
+```
 
 ---
 

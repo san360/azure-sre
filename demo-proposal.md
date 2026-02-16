@@ -61,17 +61,14 @@ Every good demo needs a story the audience can hold onto. Ours is **Contoso Meal
 
 This mapping creates natural investigation paths that feel organic, not staged:
 
-```
-Customer places order
-    │
-    ├──► menu-api (Container App) ──► Cosmos DB
-    │    "What's on the menu?"        (restaurant data)
-    │
-    ├──► order-api (AKS) ──► PostgreSQL
-    │    "Place my order"     (order records)
-    │
-    └──► payment-service (AKS) ──► PostgreSQL
-         "Charge my card"          (payment transactions)
+```mermaid
+graph TD
+    A["Customer places order"] --> B["menu-api (Container App)"]
+    A --> C["order-api (AKS)"]
+    A --> D["payment-service (AKS)"]
+    B -->|"What's on the menu?"| E["Cosmos DB (restaurant data)"]
+    C -->|"Place my order"| F["PostgreSQL (order records)"]
+    D -->|"Charge my card"| G["PostgreSQL (payment transactions)"]
 ```
 
 When the payment-service has issues, it's not abstract — it's *"customers can browse menus but orders are failing at checkout."* When Cosmos DB throttles, *"the menu page is slow but existing orders are processing fine."* These are real business impact statements the SRE Agent can articulate.
@@ -153,121 +150,88 @@ module loadTest 'br/public:avm/res/load-test-service/load-test:0.4.0' = {
 
 ### Infrastructure (Bicep/AVM)
 
-```
-Resource Group: rg-contoso-meals (Sweden Central)
-│
-├── Azure SRE Agent: contoso-meals-sre
-│   │  (Bicep: Microsoft.App/agents@2025-05-01-preview)
-│   ├── Application Insights (connected via Bicep)
-│   ├── Log Analytics Workspace (auto-provisioned)
-│   ├── User-Assigned Managed Identity: id-contoso-meals-sre-agent
-│   │   └── Tiered RBAC: Reader + Contributor + Log Analytics Reader + Key Vault roles
-│   ├── Smart Detection Alert: Failure Anomalies (auto-configured)
-│   ├── SRE Agent Administrator role: auto-assigned to deployer
-│   ├── Connector: Azure MCP Server (42+ service tool groups)
-│   ├── Connector: Microsoft Teams
-│   ├── Connector: Outlook
-│   └── Connector: Custom MCP — mcp-atlassian (Jira SM, 34 tools)
-│
-├── AKS Cluster: aks-contoso-meals
-│   │  (AVM: avm/res/container-service/managed-cluster)
-│   ├── Namespace: production
-│   │   ├── Deployment: order-api (.NET 9 — order management)
-│   │   └── Deployment: payment-service (.NET 9 — payment processing, fault-injectable)
-│   ├── Container Insights enabled → Log Analytics
-│   └── Chaos Studio Target (pod chaos, network latency)
-│
-├── Container App: menu-api
-│   │  (AVM: avm/res/app/container-app)
-│   ├── .NET 9 — restaurant menu & catalog service
-│   ├── Container App Environment with Log Analytics
-│   └── Managed Identity → Cosmos DB access
-│
-├── Azure Database for PostgreSQL Flexible Server: psql-contoso-meals
-│   │  (AVM: avm/res/db-for-postgre-sql/flexible-server)
-│   ├── Database: ordersdb (orders, customers, payments)
-│   ├── Database: jiradb (Jira Service Management)
-│   └── Diagnostic settings → Log Analytics
-│
-├── Cosmos DB Account: cosmos-contoso-meals
-│   │  (AVM: avm/res/document-db/database-account)
-│   ├── Database: catalogdb
-│   ├── Container: restaurants (partitioned by /city)
-│   ├── Container: menus (partitioned by /restaurantId)
-│   └── Diagnostic settings → Log Analytics
-│
-├── Key Vault: kv-contoso-meals
-│   │  (AVM: avm/res/key-vault/vault)
-│   └── Connection strings, payment gateway keys, feature flags
-│
-├── Azure Monitor
-│   ├── Alert Rule: AKS pod restart count > 0
-│   ├── Alert Rule: payment-service P95 latency > 2s
-│   ├── Alert Rule: PostgreSQL active connections > 80%
-│   ├── Alert Rule: Cosmos DB 429 (throttled requests) > 0
-│   └── Action Group → SRE Agent
-│
-├── Azure Chaos Studio
-│   ├── Target: AKS Cluster (Chaos Mesh provider)
-│   ├── Experiment: Kill payment-service pods every 60s for 5 min
-│   └── Experiment: Inject 500ms network latency on order-api
-│
-├── Storage Account: st<prefix> (sanitized)
-│   │  (AVM: avm/res/storage/storage-account)
-│   └── File Share: jira-home (Jira home directory persistence)
-│
-├── Container App: jira-sm
-│   │  (AVM: avm/res/app/container-app)
-│   ├── Jira Service Management 10.0 (atlassian/jira-servicemanagement:10.0)
-│   ├── 2 vCPU, 4 GB RAM
-│   ├── Port 8080
-│   ├── PostgreSQL backend (jiradb on psql-contoso-meals)
-│   └── Azure Files volume mount (/var/atlassian/application-data/jira)
-│
-├── Container App: mcp-atlassian
-│   │  (AVM: avm/res/app/container-app)
-│   ├── MCP-Atlassian Server (ghcr.io/sooperset/mcp-atlassian:latest)
-│   ├── 0.5 vCPU, 512 MB RAM
-│   ├── Port 9000 (streamable-http transport)
-│   ├── 34 Jira MCP tools (create, update, transition, search, SLA)
-│   └── Exposes /mcp endpoint for SRE Agent
-│
-└── Azure Load Testing: lt-contoso-meals
-    │  (AVM: avm/res/load-test-service/load-test)
-    ├── Test: Baseline traffic (10 VUs, steady state)
-    └── Test: Peak load (50 VUs, ramp to simulate lunch rush)
+```mermaid
+graph TD
+    RG["Resource Group: rg-contoso-meals<br/>(Sweden Central)"]
+
+    RG --> SRE["Azure SRE Agent: contoso-meals-sre<br/>Microsoft.App/agents@2025-05-01-preview"]
+    SRE --> AI["Application Insights"]
+    SRE --> LAW["Log Analytics Workspace"]
+    SRE --> MI["User-Assigned Managed Identity<br/>id-contoso-meals-sre-agent"]
+    SRE --> SD["Smart Detection Alert: Failure Anomalies"]
+    SRE --> AMCP["Connector: Azure MCP Server (42+ tools)"]
+    SRE --> TEAMS["Connector: Microsoft Teams"]
+    SRE --> OUTLOOK["Connector: Outlook"]
+    SRE --> JMCP["Connector: mcp-atlassian (Jira, 34 tools)"]
+
+    RG --> AKS["AKS Cluster: aks-contoso-meals"]
+    AKS --> NS["Namespace: production"]
+    NS --> OA["order-api (.NET 9)"]
+    NS --> PS["payment-service (.NET 9, fault-injectable)"]
+    AKS --> CI["Container Insights → Log Analytics"]
+    AKS --> CST["Chaos Studio Target"]
+
+    RG --> MENU["Container App: menu-api (.NET 9)"]
+    MENU --> CAE["Container App Environment"]
+    MENU --> MENUMI["Managed Identity → Cosmos DB"]
+
+    RG --> PG["PostgreSQL Flexible Server<br/>psql-contoso-meals"]
+    PG --> ODB["Database: ordersdb"]
+    PG --> JDB["Database: jiradb"]
+
+    RG --> COSMOS["Cosmos DB: cosmos-contoso-meals"]
+    COSMOS --> CDB["Database: catalogdb"]
+    CDB --> REST["Container: restaurants (/city)"]
+    CDB --> MENUS["Container: menus (/restaurantId)"]
+
+    RG --> KV["Key Vault: kv-contoso-meals"]
+    RG --> MON["Azure Monitor"]
+    MON --> A1["Alert: Pod restart count > 0"]
+    MON --> A2["Alert: P95 latency > 2s"]
+    MON --> A3["Alert: PostgreSQL connections > 80%"]
+    MON --> A4["Alert: Cosmos DB 429 throttling"]
+
+    RG --> CHAOS["Azure Chaos Studio"]
+    CHAOS --> E1["Experiment: Kill payment-service pods"]
+    CHAOS --> E2["Experiment: Network latency on order-api"]
+
+    RG --> SA["Storage Account: Azure Files"]
+    SA --> JH["File Share: jira-home"]
+
+    RG --> JIRA["Container App: jira-sm<br/>Jira Service Management 10.0"]
+    JIRA --> JIRADB["PostgreSQL (jiradb)"]
+
+    RG --> MCPA["Container App: mcp-atlassian<br/>34 Jira MCP tools, port 9000"]
+
+    RG --> LT["Azure Load Testing: lt-contoso-meals"]
+    LT --> BL["Test: Baseline (10 VUs)"]
+    LT --> LR["Test: Peak load (50 VUs)"]
 ```
 
 ### Application Flow Diagram
 
-```
-     Azure Load Testing
-     (simulated customers)
-            │
-            ▼
-    ┌───────────────┐    ┌───────────────────────────────┐
-    │  menu-api     │    │       AKS Cluster              │
-    │  (Container   │    │  ┌─────────────────────────┐   │
-    │   App)        │    │  │  order-api               │   │
-    │               │    │  │  "Place order, track it"  │   │
-    │  "Browse      │    │  │         │                 │   │
-    │   restaurants │    │  │  payment-service          │   │
-    │   and menus"  │    │  │  "Process payment"        │   │
-    │       │       │    │  │  ⚡ Chaos Studio target   │   │
-    │       ▼       │    │  └───────────┬───────────────┘   │
-    │   Cosmos DB   │    │              │                   │
-    │  (catalogdb)  │    │              ▼                   │
-    │               │    │       PostgreSQL                 │
-    └───────────────┘    │       (ordersdb)                 │
-                         └───────────────────────────────────┘
-                                        │
-                           ┌────────────┴────────────┐
-                           │                         │
-                       Key Vault              Azure Monitor
-                    (secrets, keys)        (metrics, logs, alerts)
-                                                     │
-                                              Azure SRE Agent
-                                           (connected via MCP)
+```mermaid
+graph TD
+    ALT["Azure Load Testing<br/>(simulated customers)"] --> MENU["menu-api<br/>(Container App)"]
+    ALT --> AKS
+
+    subgraph AKS["AKS Cluster"]
+        OA["order-api<br/>'Place order, track it'"]
+        PS["payment-service<br/>'Process payment'<br/>⚡ Chaos Studio target"]
+    end
+
+    MENU -->|"Browse restaurants<br/>and menus"| CDB["Cosmos DB<br/>(catalogdb)"]
+    OA --> PG["PostgreSQL<br/>(ordersdb)"]
+    PS --> PG
+
+    PG --> KV["Key Vault<br/>(secrets, keys)"]
+    PG --> MON["Azure Monitor<br/>(metrics, logs, alerts)"]
+    MON --> SRE["Azure SRE Agent<br/>(connected via MCP)"]
+    SRE --> MCPA["mcp-atlassian<br/>(Container App)"]
+    SRE --> TEAMS["Teams Connector"]
+    SRE --> KB["Knowledge Base"]
+    MCPA --> JIRA["Jira SM<br/>(Container App)"]
+    JIRA --> JIRADB["PostgreSQL (jiradb)"]
 ```
 
 ### Why This Architecture Tells a Story
@@ -276,22 +240,19 @@ The audience sees a **business they understand** — ordering food — running o
 
 ### ITSM Integration Path (Part 4)
 
-```
-Azure Monitor Alert fires
-         │
-         ▼
-  Azure SRE Agent ──────────────── mcp-atlassian ──────── Jira SM
-  (investigates via MCP)          (Container App)          (Container App)
-         │                         port 9000/mcp            port 8080
-         │                              │
-         ├── jira_create_issue ─────────┤
-         ├── jira_add_comment ──────────┤
-         ├── jira_transition_issue ─────┤
-         ├── jira_update_issue ─────────┤
-         └── jira_get_issue_sla ────────┘
-                                         │
-                                    PostgreSQL
-                                    (jiradb on psql-contoso-meals)
+```mermaid
+graph LR
+    ALERT["Azure Monitor Alert fires"] --> SRE["Azure SRE Agent<br/>(investigates via MCP)"]
+    SRE --> MCPA["mcp-atlassian<br/>(Container App, port 9000/mcp)"]
+    MCPA --> JIRA["Jira SM<br/>(Container App, port 8080)"]
+    
+    SRE -->|"jira_create_issue"| MCPA
+    SRE -->|"jira_add_comment"| MCPA
+    SRE -->|"jira_transition_issue"| MCPA
+    SRE -->|"jira_update_issue"| MCPA
+    SRE -->|"jira_get_issue_sla"| MCPA
+    
+    JIRA --> PG["PostgreSQL<br/>(jiradb on psql-contoso-meals)"]
 ```
 
 > **Important architectural note:** Jira SM is NOT a built-in incident platform trigger (only ServiceNow and PagerDuty are). Azure Monitor Alerts trigger the SRE Agent natively. The agent then creates, updates, and resolves Jira tickets via MCP tools during its investigation — a pull-based ITSM integration pattern rather than a push-based trigger.
@@ -1615,30 +1576,28 @@ The `samples/proactive-reliability/` folder contains the **.NET Day 2025** demo 
 
 This is the most sophisticated pattern in the official samples — a **three-subagent pipeline** with different trigger types:
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  PROACTIVE RELIABILITY PIPELINE (from microsoft/sre-agent samples) │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  1. AvgResponseTime (Scheduled - Daily)                            │
-│     ├── Query App Insights: avg(duration) last 15 min              │
-│     ├── Upload baseline.txt to Knowledge Base                       │
-│     └── Stored: BaselineResponseTime + BaselineTimestamp            │
-│                                                                     │
-│  2. DeploymentHealthCheck (Incident Trigger - "slot swap" alert)   │
-│     ├── Query App Insights: current avg response time               │
-│     ├── Retrieve baseline.txt from Knowledge Base                   │
-│     ├── Compare: if current > baseline × 1.2 → DEGRADED            │
-│     ├── AUTO-EXECUTE: az webapp deployment slot swap                │
-│     ├── Create GitHub issue with semantic code search               │
-│     └── Post to Teams channel with deployment health report         │
-│                                                                     │
-│  3. DeploymentReporter (Scheduled - Daily)                          │
-│     ├── Read Teams messages for deployment health posts              │
-│     ├── Compile MTTD/MTTR metrics                                   │
-│     └── Send summary email to ops team                              │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Pipeline["Proactive Reliability Pipeline<br/>(from microsoft/sre-agent samples)"]
+        direction TB
+        
+        S1["1. AvgResponseTime<br/>(Scheduled - Daily)"]
+        S1A["Query App Insights: avg(duration) last 15 min"]
+        S1B["Upload baseline.txt to Knowledge Base"]
+        S1 --> S1A --> S1B
+
+        S2["2. DeploymentHealthCheck<br/>(Incident Trigger - 'slot swap' alert)"]
+        S2A["Query App Insights: current avg response time"]
+        S2B["Compare: if current > baseline × 1.2 → DEGRADED"]
+        S2C["AUTO-EXECUTE: az webapp deployment slot swap"]
+        S2D["Create GitHub issue + Post to Teams"]
+        S2 --> S2A --> S2B --> S2C --> S2D
+
+        S3["3. DeploymentReporter<br/>(Scheduled - Daily)"]
+        S3A["Read Teams messages for deployment health posts"]
+        S3B["Compile MTTD/MTTR metrics → Send summary email"]
+        S3 --> S3A --> S3B
+    end
 ```
 
 **Demo timeline from their walkthrough:**
