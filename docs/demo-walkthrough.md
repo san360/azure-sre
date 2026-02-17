@@ -139,7 +139,7 @@ Type:
 ```
 Send a summary of this investigation to the Teams channel. Include the
 business impact — what percentage of orders failed during the chaos
-experiment. Then create a GitHub issue recommending that we add a
+experiment. Then create a JIRA issue recommending that we add a
 PodDisruptionBudget to the payment-service to survive pod failures
 during peak traffic.
 ```
