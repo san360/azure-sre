@@ -30,6 +30,9 @@ param sreAgentMode string = 'Review'
 @description('External URL of the Payment Service (e.g. http://<LB-IP>). Empty = skip availability test.')
 param paymentServiceUrl string = ''
 
+@description('Object ID of the deployer user to assign the SRE Agent Administrator role. Leave empty to skip.')
+param deployerPrincipalId string = ''
+
 @description('Additional resource group names the SRE Agent should have access to (cross-RG monitoring)')
 param targetResourceGroups array = []
 
@@ -130,7 +133,7 @@ module aks 'br/public:avm/res/container-service/managed-cluster:0.12.0' = {
     agentPools: [
       {
         name: 'workload'
-        count: 1
+        count: 2
         vmSize: 'Standard_B2s'
         mode: 'User'
         osType: 'Linux'
@@ -318,8 +321,8 @@ module sreAgentIdentity 'br/public:avm/res/managed-identity/user-assigned-identi
 }
 
 // Role Assignment: Grant the SRE Agent identity tiered access on the resource group
-// Adapted from official microsoft/sre-agent samples for tiered role assignment
-// High: Reader + Contributor + Log Analytics Reader + Key Vault roles
+// Adapted from official microsoft/sre-agent samples and azure-sre-agent-sandbox for tiered role assignment
+// High: Reader + Contributor + Log Analytics Reader/Contributor + Monitoring Reader + AKS roles + Key Vault + ACR
 // Low:  Reader + Log Analytics Reader
 module sreAgentRoleAssignment 'modules/sre-agent-role.bicep' = {
   scope: rg
@@ -328,7 +331,27 @@ module sreAgentRoleAssignment 'modules/sre-agent-role.bicep' = {
     principalId: sreAgentIdentity.outputs.principalId
     accessLevel: sreAgentAccessLevel
     enableKeyVault: true
+    aksClusterName: aks.outputs.name
+    acrName: 'acr${sanitizedPrefix}'
   }
+  dependsOn: [
+    acr
+  ]
+}
+
+// Deployer user role assignments — AKS admin + Key Vault admin for the current deploying user
+// Ref: https://github.com/matthansen0/azure-sre-agent-sandbox/blob/main/scripts/configure-rbac.ps1
+module deployerRoles 'modules/deployer-roles.bicep' = if (!empty(deployerPrincipalId)) {
+  scope: rg
+  name: 'deployer-role-assignments'
+  params: {
+    deployerPrincipalId: deployerPrincipalId
+    aksClusterName: aks.outputs.name
+    keyVaultName: 'kv-${sanitizedPrefix}sc'
+  }
+  dependsOn: [
+    keyVault
+  ]
 }
 
 // Azure Load Testing (AVM)
@@ -551,6 +574,7 @@ module sreAgent './modules/sre-agent.bicep' = if (enableSreAgent) {
     appInsightsConnectionString: appInsights.outputs.connectionString
     accessLevel: sreAgentAccessLevel
     agentMode: sreAgentMode
+    deployerPrincipalId: deployerPrincipalId
     tags: tags
   }
   dependsOn: [

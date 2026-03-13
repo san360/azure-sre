@@ -21,7 +21,7 @@ spec:
         workload-type: application
       containers:
         - name: payment-service
-          image: acrcontosomeals.azurecr.io/payment-service:latest
+          image: acrcontosomeals.azurecr.io/contoso-meals-sre/payment-service-contoso-meals-demo:azd-deploy-1773388633
           ports:
             - containerPort: 8080
               protocol: TCP

@@ -28,6 +28,9 @@ param accessLevel string = 'High'
 @allowed(['Review', 'Autonomous', 'ReadOnly'])
 param agentMode string = 'Review'
 
+@description('Object ID of the deployer user to assign SRE Agent Administrator role. Empty = skip.')
+param deployerPrincipalId string = ''
+
 @description('Tags to apply to resources')
 param tags object = {}
 
@@ -66,9 +69,20 @@ resource sreAgent 'Microsoft.App/agents@2025-05-01-preview' = {
   }
 }
 
-// NOTE: SRE Agent Administrator role assignment is handled by deploy.sh using
-// `az role assignment create` which is idempotent (won't fail if already exists).
-// Deploying it via Bicep causes "RoleAssignmentExists" errors on re-deployment.
+// SRE Agent Administrator role assignment for the deployer
+// Role ID: e79298df-d852-4c6d-84f9-5d13249d1e55 (SRE Agent Administrator)
+// Ref: https://learn.microsoft.com/en-gb/azure/sre-agent/user-roles
+// NOTE: Uses deterministic GUID based on resourceGroup().id to avoid RoleAssignmentExists conflicts
+// when the deployer has already been assigned this role via CLI (az role assignment create).
+resource sreAgentAdminRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployerPrincipalId)) {
+  name: guid(resourceGroup().id, deployerPrincipalId, 'e79298df-d852-4c6d-84f9-5d13249d1e55')
+  scope: sreAgent
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'e79298df-d852-4c6d-84f9-5d13249d1e55')
+    principalId: deployerPrincipalId
+    principalType: 'User'
+  }
+}
 
 output agentId string = sreAgent.id
 output agentName string = sreAgent.name
