@@ -16,7 +16,7 @@ The goal is to configure Azure SRE Agent with an **Incident Response Plan** back
 5. **Adds comments to the Jira ticket** after each investigation step with findings
 6. **Notifies the user** via Teams/Outlook to review the investigation
 
-**Yes, a subagent is needed** — and the architecture should use **two subagents** with a handoff pattern. Here's why and how.
+**Yes, a subagent is needed** — and the GA-friendly architecture should use **response-plan routing plus standalone follow-up workflows** rather than runtime handoff chaining. Here's why and how.
 
 ---
 
@@ -38,7 +38,7 @@ The **subagent** is where all the intelligence lives:
 - Custom instructions that define the multi-step investigation workflow
 - Tool assignments (Azure MCP tools + Jira MCP tools)
 - Knowledge base access (runbooks, escalation procedures)
-- Handoff rules (when to escalate to another subagent or human)
+- Decision rules for when to remediate in-thread, trigger a separate follow-up workflow, or escalate to a human
 
 ### Official Pattern: Octopets `pd-azure-resource-error-handler.yaml`
 
@@ -51,11 +51,11 @@ We adapt this for our Contoso Meals + Jira use case.
 
 ---
 
-## 3. Proposed Architecture: Two-Subagent Design
+## 3. Proposed Architecture: Primary Incident Handler + Follow-Up Workflows
 
-### Why two subagents instead of one?
+### Why this layout instead of a handoff chain?
 
-A single subagent doing everything (investigate + create Jira + update Jira + notify) works but creates a monolithic instruction set. Based on the Azure SRE Agent team's own [context engineering lessons](https://techcommunity.microsoft.com/blog/appsonazureblog/context-engineering-lessons-from-building-azure-sre-agent/4481200), problems requiring more than four agent handoffs "almost always failed." Two is the sweet spot:
+A single subagent doing everything (investigate + create Jira + update Jira + notify) can work, but it becomes a monolithic instruction set. A chained multi-subagent flow also adds routing overhead. Based on the Azure SRE Agent team's own [context engineering lessons](https://techcommunity.microsoft.com/blog/appsonazureblog/context-engineering-lessons-from-building-azure-sre-agent/4481200), deeper handoff chains became unreliable. The GA-safe pattern is a broad IncidentHandler for the live incident plus separate follow-up workflows when needed:
 
 ```mermaid
 graph TD
@@ -65,19 +65,19 @@ graph TD
     
     TRIGGER --> S1
 
-    S1["Subagent 1: ContosoMealsIncidentHandler<br/>(Primary — Investigation + Jira + Notify)"]
+    S1["Primary Incident Workflow<br/>ContosoMealsIncidentHandler"]
     S1P1["Phase 1: Thread naming from alert title"]
     S1P2["Phase 2: Create Jira ticket (CONTOSO proj)"]
     S1P3["Phase 3: Investigate (AKS, App Insights,<br/>PostgreSQL, Cosmos DB, Chaos)"]
     S1P4["Phase 4: Post findings as Jira comments"]
     S1P5["Phase 5: Teams + Outlook notification"]
-    S1P6["Phase 6: Handoff to Resilience Validator<br/>(if chaos experiment detected)"]
+    S1P6["Phase 6: Recommend remediation or follow-up<br/>(based on findings and run mode)"]
     
     S1 --> S1P1 --> S1P2 --> S1P3 --> S1P4 --> S1P5 --> S1P6
 
-    S1P6 -->|"conditional handoff"| S2
+    S1P6 -->|"separate response plan, task,<br/>or manual invocation"| S2
 
-    S2["Subagent 2: ContosoMealsResilienceValidator<br/>(Secondary — Post-Incident Analysis)<br/>- Compare error rates to baseline<br/>- Evaluate chaos experiment results<br/>- Create GitHub issue for resilience fixes<br/>- Update Jira ticket with recommendations"]
+    S2["Standalone Follow-Up Workflow<br/>ContosoMealsResilienceValidator<br/>- Compare error rates to baseline<br/>- Evaluate chaos experiment results<br/>- Create GitHub issue for resilience fixes<br/>- Update Jira ticket with recommendations"]
 ```
 
 ### When to use just ONE subagent
@@ -124,10 +124,10 @@ Navigate to **SRE Agent → Subagent Builder → Create → Subagent**
 |----------|-------|
 | **Name** | `ContosoMealsIncidentHandler` |
 | **Instructions** | *(see YAML below)* |
-| **Handoff Description** | `Activate when a Contoso Meals production service has an active alert or incident. Performs end-to-end investigation, creates and updates Jira tickets with real-time findings, and notifies the team.` |
+| **Subagent Description** | `Use as the primary response-plan target for Contoso Meals production incidents. Performs end-to-end investigation, creates and updates Jira tickets with real-time findings, and notifies the team.` |
 | **Built-in Tools** | Azure CLI, Log Analytics, Application Insights |
 | **MCP Tools** | Azure MCP (all tool groups), mcp-atlassian (Jira tools) |
-| **Handoff Agents** | `ContosoMealsResilienceValidator` (optional) |
+| **Activation** | Incident response plan |
 | **Knowledge Base** | Enable — link to uploaded runbooks |
 
 #### Subagent YAML
@@ -144,7 +144,7 @@ Navigate to **SRE Agent → Subagent Builder → Create → Subagent**
 |----------|-------|
 | **Name** | `ContosoMealsResilienceValidator` |
 | **Instructions** | *(see below)* |
-| **Handoff Description** | `Hand off to this subagent when a chaos experiment is detected or completed, or when post-incident resilience analysis is needed.` |
+| **Subagent Description** | `Use this subagent for post-incident resilience analysis when a chaos experiment is detected or completed, or when a resolved incident needs follow-up validation.` |
 | **Built-in Tools** | Azure CLI, Log Analytics |
 | **MCP Tools** | Azure MCP (AKS, Monitor tools), mcp-atlassian (Jira tools) |
 | **Knowledge Base** | Enable |
@@ -192,7 +192,7 @@ Investigate and follow your incident response process.
    - Creates a Jira ticket in CONTOSO project
    - Posts investigation comments step by step
    - Sends a Teams notification
-   - Attempts handoff to ResilienceValidator if chaos detected
+    - Recommends a resilience follow-up workflow if chaos is detected
 
 ---
 
@@ -245,7 +245,7 @@ sequenceDiagram
     SRE->>JIRA: 11. jira_transition_issue
     Note over JIRA: 12. Status → "In Progress"
     Note over SRE: 13. Notify via Teams + Outlook<br/>"Look into CONTOSO-42"
-    Note over SRE: 14. Handoff (if chaos):<br/>→ ContosoMealsResilienceValidator
+    Note over SRE: 14. Recommend or trigger separate resilience follow-up workflow if chaos is detected
     SRE->>JIRA: 15. jira_add_comment + transition
     Note over JIRA: 16. "Resilience analysis..."<br/>→ "Resolved"
 ```
@@ -260,11 +260,11 @@ sequenceDiagram
 |----------|----------------|---------------|
 | **Simple alert → investigate → Jira → notify** | Sufficient | Overkill |
 | **Chaos experiment → investigate → Jira → resilience analysis → GitHub issue** | Instruction bloat, >6 phases | Clean separation of concerns |
-| **Demo storytelling** | Less dramatic | Shows subagent handoff live — powerful visual |
+| **Demo storytelling** | Simpler, GA-aligned | Shows routing plus separate follow-up workflow |
 | **Maintenance** | One YAML to maintain | Two focused YAMLs, easier to evolve independently |
-| **Context window efficiency** | All tools loaded, even if unused | Each subagent only loads relevant tools |
+| **Context window efficiency** | All tools loaded, even if unused | Each workflow stays bounded and easier to reason about |
 
-**For the Contoso Meals demo:** Use two subagents. The handoff from IncidentHandler to ResilienceValidator is a demo-worthy moment that showcases the Subagent Builder's orchestration capability.
+**For the Contoso Meals demo:** Use two subagents, but connect them with response-plan routing or a scheduled follow-up task rather than a runtime handoff. That keeps the demo aligned with the current GA operating model.
 
 **For a real production deployment:** Start with one subagent. Split into two only if the investigation YAML exceeds ~200 lines or you need different tool sets for different phases.
 

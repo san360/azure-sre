@@ -6,9 +6,18 @@ set -euo pipefail
 # Configures Jira SM after first boot: creates project, workflows, users
 #######################################################################
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="${PROJECT_ROOT}/.env"
+
 RESOURCE_GROUP="rg-contoso-meals"
 JIRA_ADMIN_USER="admin"
-JIRA_ADMIN_PASSWORD="vpi:cgfME9DZNi9" # Set before running or use default
+
+# Read password from .env if available, otherwise use default
+if [ -f "$ENV_FILE" ]; then
+  JIRA_ADMIN_PASSWORD=$(grep '^JIRA_ADMIN_PASSWORD=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2- || true)
+fi
+JIRA_ADMIN_PASSWORD="${JIRA_ADMIN_PASSWORD:-admin}"
 
 echo "============================================="
 echo "  Contoso Meals - Jira SM Setup"
@@ -95,6 +104,7 @@ else
       "key": "CONTOSO",
       "name": "Contoso Meals Operations",
       "projectTypeKey": "service_desk",
+      "projectTemplateKey": "com.atlassian.servicedesk:itil-v2-service-desk-project",
       "description": "Contoso Meals incident management and SRE operations",
       "lead": "'"${JIRA_ADMIN_USER}"'",
       "assigneeType": "PROJECT_LEAD"
@@ -155,6 +165,19 @@ if [ -n "$ACTIVE_REVISION" ]; then
   echo "  mcp-atlassian restarted with updated Jira API token."
 else
   echo "  WARNING: No active revision found for mcp-atlassian."
+fi
+
+# ─── Update .env file with Jira credentials ───────────────────────
+if [ -f "$ENV_FILE" ]; then
+  # Remove existing Jira credential entries
+  sed -i '/^JIRA_ADMIN_USER=/d' "$ENV_FILE"
+  sed -i '/^JIRA_ADMIN_PASSWORD=/d' "$ENV_FILE"
+  # Append updated values
+  echo "JIRA_ADMIN_USER=${JIRA_ADMIN_USER}" >> "$ENV_FILE"
+  echo "JIRA_ADMIN_PASSWORD=${JIRA_ADMIN_PASSWORD}" >> "$ENV_FILE"
+  echo "  .env updated with JIRA_ADMIN_USER and JIRA_ADMIN_PASSWORD"
+else
+  echo "  WARNING: .env file not found at $ENV_FILE — skipping .env update"
 fi
 
 echo ""

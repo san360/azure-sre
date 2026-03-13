@@ -32,6 +32,7 @@ var roleDefinitions = {
     'b24988ac-6180-42a0-ab88-20f7382dd24c' // Contributor
     '73c42c96-874c-492b-b04d-ab87d138a893' // Log Analytics Contributor
     '43d0d8ad-25c7-4714-9337-8ba259a9fe05' // Monitoring Reader
+    '749f88d5-cbae-40b8-bcfc-e573ddc772fa' // Monitoring Contributor
   ]
 }
 

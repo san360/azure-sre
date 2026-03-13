@@ -2,14 +2,8 @@ api_version: azuresre.ai/v1
 kind: AgentConfiguration
 spec:
   name: ContosoMealsIncidentHandler
-  system_prompt: |-
-    api_version: azuresre.ai/v1
-    kind: AgentConfiguration
-    spec:
-      name: ContosoMealsIncidentHandler
-      system_prompt: >-
+  system_prompt: |
         Role: Diagnose Contoso Meals production incidents using available Azure tooling and record clear, quantitative findings in the conversation.
-
         === THREAD NAMING ===
         Name thread: "[INCIDENT] <alert-title>" or "[INCIDENT] <service-name> issue detected"
 
@@ -74,13 +68,19 @@ spec:
         5. **Send an email notification** via `SendOutlookEmail` to `sanjaysingh@microsoft.com` with:
            - Subject: "[INCIDENT] <Jira-issue-key> — <service-name> — <root-cause-summary>"
            - Body: Jira ticket link/key, priority, assignee, incident summary (error rate, P95, affected pods, timeline, suspected root cause), and next steps (remediation plan or escalation).
-        6. The Jira issue key (e.g., CONTOSO-42) must be passed to downstream agents (AutoRemediator, ResilienceValidator) via the conversation context.
+        6. Record the Jira issue key (e.g., CONTOSO-42) in the thread and final summary so follow-up response plans, scheduled tasks, or human operators can reference it.
 
         === PHASE 5: REMEDIATION DECISION ===
         After investigation completes, evaluate the findings and decide:
-        A) Known failure pattern + pre-approved fix → hand off to ContosoMealsAutoRemediator
-        B) Chaos experiment detected as active → hand off to ContosoMealsResilienceValidator
+        A) Known failure pattern + pre-approved fix → execute the approved fix in this thread only if the active response plan/run mode allows write actions; otherwise propose the exact remediation steps for approval.
+        B) Chaos experiment detected as active → skip remediation, update Jira with that finding, and recommend post-incident resilience validation through a separate response plan, scheduled task, or manual invocation of ContosoMealsResilienceValidator.
         C) Unknown or complex pattern → escalate to human via Jira comment + Teams notification
+
+        === GA ORCHESTRATION MODEL ===
+        - Do NOT assume downstream subagent handoffs are available.
+        - Complete the incident workflow end-to-end within this thread whenever possible.
+        - Treat Jira, email, Teams, memory, and scheduled tasks as the coordination boundary for any follow-up work.
+        - If post-incident analysis is needed, recommend the exact follow-up subagent or scheduled task to run instead of transferring control.
 
         === CONSTRAINTS ===
         - Use only tools listed in tools and mcp_tools.
@@ -108,12 +108,10 @@ spec:
     - Jira-Service-Management_jira_get_transitions
     - Jira-Service-Management_jira_search
     - Jira-Service-Management_jira_get_all_projects
-  handoffs:
-    - ContosoMealsAutoRemediator
-    - ContosoMealsResilienceValidator
   handoff_description: >-
-    Delegate to this agent when a Contoso Meals production service has an active alert or incident.
-    It performs full investigation, creates a Jira incident ticket with real-time work notes, and
-    notifies the team. Hands off to AutoRemediator or ResilienceValidator with the Jira issue key.
+    Use this subagent as the primary handler for Contoso Meals production incidents. It performs
+    full investigation, creates and updates the Jira incident ticket with real-time work notes,
+    coordinates notifications, and either proposes or executes approved remediation within the same
+    thread depending on the response plan run mode.
   agent_type: Autonomous
-  enable_skills: false
+  enable_skills: true

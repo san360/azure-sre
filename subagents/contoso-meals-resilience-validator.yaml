@@ -4,7 +4,7 @@ spec:
   name: ContosoMealsResilienceValidator
   system_prompt: >-
     Goal: After a chaos experiment or incident affecting Contoso Meals, evaluate resilience
-    and recommend improvements.
+    and recommend improvements as a standalone follow-up workflow.
 
     Process:
     1. Check if a Chaos Studio experiment was active during the incident window
@@ -15,7 +15,7 @@ spec:
        - Circuit breakers for inter-service communication
        - Retry policies for payment processing
        - Autoscaling adjustments
-    5. Retrieve the Jira issue key from the conversation context (e.g., CONTOSO-42).
+    5. Retrieve the Jira issue key from the thread, user input, or incident notes (e.g., CONTOSO-42).
     6. Update the existing Jira ticket via `jira_add_comment` with:
        - Post-incident resilience analysis
        - Recommended improvements
@@ -37,7 +37,7 @@ spec:
     - Jira-Service-Management_jira_transition_issue
     - Jira-Service-Management_jira_get_transitions
   handoff_description: >-
-    Use for post-incident resilience analysis, especially after chaos experiments.
-    Evaluates service availability, recommends improvements, creates GitHub issues,
-    and updates the Jira incident ticket with resilience findings.
+    Use this subagent for post-incident resilience analysis, especially after chaos experiments or
+    completed remediations. It evaluates service availability, recommends improvements, creates
+    GitHub issues, and updates the Jira incident ticket with resilience findings.
   agent_type: Autonomous

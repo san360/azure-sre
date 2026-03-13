@@ -499,7 +499,7 @@ Close the loop by building a custom subagent:
 |----------|-------|
 | Name | Contoso Meals Resilience Validator |
 | Instructions | *"After any chaos experiment completes on the Contoso Meals platform, evaluate the results. Check if order-api and payment-service maintained availability during the experiment. Compare error rates and latency to the baseline load test. If availability dropped below 99%, create a GitHub issue recommending resilience improvements (PodDisruptionBudgets, circuit breakers, retry policies). Always note the business impact in terms of failed customer orders."* |
-| Handoff Description | *"Hand off to this subagent when a chaos experiment is detected or completed"* |
+| Subagent Description | *"Use this subagent for post-incident resilience validation after a chaos experiment is detected or completed"* |
 | Built-in Tools | Azure CLI, Log Analytics |
 | MCP Tools | Azure MCP (AKS tools, Monitor tools) |
 
@@ -1529,7 +1529,7 @@ The Octopets `pd-azure-resource-error-handler.yaml` is a masterclass in autonomo
 
 > **YAML definition:** [`subagents/contoso-meals-incident-handler.yaml`](subagents/contoso-meals-incident-handler.yaml)
 >
-> Full incident handler with 5-phase process (Intake → Investigation → Assessment → Jira → Remediation Decision), Jira MCP integration, and handoffs to AutoRemediator + ResilienceValidator.
+> Full incident handler with 5-phase process (Intake → Investigation → Assessment → Jira → Remediation Decision), Jira MCP integration, and GA-friendly routing to remediation or resilience follow-up workflows.
 
 **2. Scheduled Health Check for Contoso Meals**
 

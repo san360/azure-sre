@@ -33,7 +33,7 @@ This proposal adds a **Part 5: Auto-Remediation** capability where the SRE Agent
 
 ### Key Design Principle: Separation of Concerns
 
-Following the [context engineering lessons](https://techcommunity.microsoft.com/blog/appsonazureblog/context-engineering-lessons-from-building-azure-sre-agent/4481200) from the Azure SRE Agent team, we use a **three-subagent handoff chain** (maximum practical limit before quality degrades):
+Following the [context engineering lessons](https://techcommunity.microsoft.com/blog/appsonazureblog/context-engineering-lessons-from-building-azure-sre-agent/4481200) from the Azure SRE Agent team, we use a **response-plan routing model with bounded subagents** instead of a runtime handoff chain:
 
 ```mermaid
 graph TD
@@ -43,23 +43,23 @@ graph TD
     
     TRIGGER --> S1["Subagent 1: ContosoMealsIncidentHandler<br/>(Investigation → Jira → Notify)<br/>Phases 1-5: Investigate, create Jira, notify<br/>Phase 6: Evaluate remediation eligibility"]
     
-    S1 -->|"Known pattern +<br/>pre-approved fix"| S2A["Subagent 2a: ContosoMeals<br/>AutoRemediator ★ NEW<br/>- Execute pre-approved actions<br/>- Validate fix<br/>- Update Jira<br/>- Handoff to ResilienceValidator"]
+    S1 -->|"Known pattern +<br/>pre-approved fix"| S2A["Subagent 2a: ContosoMeals<br/>AutoRemediator ★ NEW<br/>- Execute pre-approved actions<br/>- Validate fix<br/>- Update Jira<br/>- Recommend resilience follow-up if needed"]
     
     S1 -->|"Chaos experiment<br/>detected"| S2B["Subagent 2b: ContosoMeals<br/>ResilienceValidator<br/>(post-incident analysis)"]
     
-    S2A --> S2B
+    S2A -. separate response plan, task, or manual invocation .-> S2B
 ```
 
 ### When Does Auto-Remediation Activate?
 
 The `ContosoMealsIncidentHandler` (Subagent 1) evaluates a **remediation decision matrix** after investigation:
 
-| Condition | Action | Handoff Target |
+| Condition | Action | Execution Path |
 |-----------|--------|----------------|
-| Known failure pattern + clear root cause + pre-approved fix | **Auto-remediate** | `ContosoMealsAutoRemediator` |
-| Chaos experiment detected + no remediation needed | **Analyze resilience** | `ContosoMealsResilienceValidator` |
-| Unknown failure pattern OR multi-service cascade | **Alert human** | None (stays in IncidentHandler, notifies Teams) |
-| Remediation failed after 2 attempts | **Escalate** | None (pages on-call, P1 Jira escalation) |
+| Known failure pattern + clear root cause + pre-approved fix | **Auto-remediate** | IncidentHandler executes in-thread if allowed, or route to `ContosoMealsAutoRemediator` via a dedicated response plan/task |
+| Chaos experiment detected + no remediation needed | **Analyze resilience** | Trigger or recommend `ContosoMealsResilienceValidator` as a separate workflow |
+| Unknown failure pattern OR multi-service cascade | **Alert human** | Stays in IncidentHandler, notifies Teams |
+| Remediation failed after 2 attempts | **Escalate** | Page on-call, P1 Jira escalation |
 
 ---
 
@@ -203,10 +203,10 @@ Navigate to **SRE Agent → Subagent Builder → Create → Subagent**
 |----------|-------|
 | **Name** | `ContosoMealsAutoRemediator` |
 | **Instructions** | *(see YAML file)* |
-| **Handoff Description** | `Hand off to this subagent when a known, pre-approved remediation pattern is identified and confirmed by investigation. Executes bounded write actions and validates the fix.` |
+| **Subagent Description** | `Use this subagent for known, pre-approved remediation patterns identified during incident triage. Executes bounded write actions and validates the fix.` |
 | **Built-in Tools** | Azure CLI (read + write), Log Analytics, Application Insights |
 | **MCP Tools** | Azure MCP (AKS, Container Apps, Cosmos DB, Monitor tools), mcp-atlassian (Jira tools) |
-| **Handoff Agents** | `ContosoMealsResilienceValidator` |
+| **Activation** | Dedicated response plan, scheduled task, or manual invocation |
 | **Knowledge Base** | Enable — link to uploaded runbooks |
 
 > **YAML definition:** [`subagents/contoso-meals-auto-remediator.yaml`](../subagents/contoso-meals-auto-remediator.yaml)
@@ -217,21 +217,15 @@ Navigate to **SRE Agent → Subagent Builder → Create → Subagent**
 
 ## 5. Required Changes to Existing Configuration
 
-### 5.1 Update `ContosoMealsIncidentHandler` — Add Remediation Handoff
+### 5.1 Update `ContosoMealsIncidentHandler` — Add Remediation Decision Logic
 
 Add a new Phase 5 (Remediation Decision) to the existing incident handler subagent YAML (from `incident-response-plan-research.md`). **This is already included in the trimmed IncidentHandler instructions** — Phase 5 of the updated YAML contains the full remediation decision matrix:
 
-- **A)** Known pattern + pre-approved fix → hand off to `ContosoMealsAutoRemediator`
-- **B)** Chaos experiment active → hand off to `ContosoMealsResilienceValidator`
+- **A)** Known pattern + pre-approved fix → execute in-thread when allowed, or route to `ContosoMealsAutoRemediator` through a dedicated response plan/task
+- **B)** Chaos experiment active → recommend or trigger `ContosoMealsResilienceValidator` as a separate follow-up workflow
 - **C)** Unknown pattern → escalate to human via Jira + Teams
 
-Update the handoff agents to include the new subagent:
-
-```yaml
-  handoff_agents:
-    - ContosoMealsAutoRemediator      # NEW — for known patterns
-    - ContosoMealsResilienceValidator  # Existing — for post-incident analysis
-```
+No runtime handoff list is required in the YAML. The routing decision now lives in response plans, scheduled tasks, and the subagent's own prompt logic.
 
 ### 5.2 SRE Agent Access Level: Must Be "High"
 
@@ -255,7 +249,7 @@ For full auto-remediation, the agent must be in **Autonomous** mode:
 param sreAgentMode string = 'Autonomous'  // Changed from 'Review'
 ```
 
-> **For demo purposes:** You may keep the top-level agent in `Review` mode while configuring individual subagents (IncidentHandler, AutoRemediator) as `agent_type: Autonomous`. The incident trigger's processing mode controls whether the full chain runs autonomously.
+> **For demo purposes:** You may keep the top-level agent in `Review` mode while configuring individual subagents (IncidentHandler, AutoRemediator) as `agent_type: Autonomous`. The incident trigger's processing mode controls whether the selected workflow runs autonomously.
 
 ### 5.4 Update Knowledge Base — Remediation Runbook
 
@@ -320,8 +314,8 @@ kubectl delete pod -n production -l app=payment-service
 - Agent starts investigating (AKS pods, App Insights, Activity Log)
 
 **Minute 1-3:** Investigation complete → Remediation decision
-- Agent posts to Jira: *"Investigation complete. Root cause: payment-service pods terminated. No chaos experiment running. No deployment in progress. Pattern matches pre-approved remediation: Pod Restart. Handing off to auto-remediation."*
-- **Handoff** → `ContosoMealsAutoRemediator` takes over
+- Agent posts to Jira: *"Investigation complete. Root cause: payment-service pods terminated. No chaos experiment running. No deployment in progress. Pattern matches pre-approved remediation: Pod Restart. Executing approved remediation workflow."*
+- IncidentHandler executes the remediation in-thread, or a dedicated remediation workflow is triggered depending on the response-plan configuration
 
 **Minute 3-4:** Auto-remediation executes
 - Agent posts to Jira: *"🔧 Auto-remediation: Pre-check passed for Scenario 1 (Pod Failure). Current state: 0/2 pods Running. Executing: kubectl rollout restart deployment/payment-service -n production"*
@@ -333,10 +327,10 @@ kubectl delete pod -n production -l app=payment-service
 - Agent queries App Insights: *"Error rate dropped from 42% to 0.3%. P95 latency: 185ms (within baseline)."*
 - Agent posts to Jira: *"🔧 Auto-remediation: Validation PASSED. Error rate: 0.3%, P95: 185ms. Remediation successful."*
 
-**Minute 5-6:** Closure and handoff
+**Minute 5-6:** Closure and follow-up recommendation
 - Agent transitions Jira ticket to "Resolved" with full remediation log
 - Agent sends Teams message: *"✅ Auto-remediation successful for payment-service. Error rate recovered from 42% to 0.3%. Jira: CONTOSO-47"*
-- **Handoff** → `ContosoMealsResilienceValidator` for post-incident analysis
+- Recommends `ContosoMealsResilienceValidator` for post-incident analysis, or triggers it through a separate response plan/task if configured
 
 **Minute 6-8:** Resilience analysis
 - Validator creates GitHub issue: *"Add PodDisruptionBudget to payment-service to prevent simultaneous pod termination during peak traffic"*
@@ -358,7 +352,7 @@ The alert fires again (pods being killed by chaos). Watch the agent:
 1. `ContosoMealsIncidentHandler` investigates
 2. Discovers an **active Chaos Studio experiment** in the Activity Log
 3. Posts to Jira: *"Chaos Studio experiment detected (exp-contoso-meals-payment-incident). Auto-remediation skipped — this is expected behavior during chaos testing."*
-4. **Hands off to `ContosoMealsResilienceValidator`** instead of `AutoRemediator`
+4. **Triggers or recommends `ContosoMealsResilienceValidator`** instead of remediation
 
 **Narrator:** *"Same failure, completely different response. The agent detected that a Chaos Studio experiment is running and deliberately skipped remediation. You don't want your auto-healer fighting your chaos engineer. The agent knows the difference."*
 
@@ -534,7 +528,7 @@ gantt
     SRE Agent investigates                  :b2, after b1, 60s
     Investigation complete                  :b3, after b2, 15s
     Jira ticket created                     :b4, after b3, 15s
-    Pattern match → handoff to remediator   :b5, after b4, 15s
+    Pattern match → start remediation workflow :b5, after b4, 15s
     Agent executes kubectl rollout restart  :b6, after b5, 15s
     Agent waits for stabilization           :b7, after b6, 60s
     Agent validates error rate 0.3%         :b8, after b7, 10s
@@ -568,7 +562,7 @@ At 50 concurrent users during lunch rush (~0.5 successful orders/second):
 1. **Show configuration** — Autonomous mode, High access, approved actions list (2 min)
 2. **Start load test** — `./scripts/start-lunch-rush.sh --load-only` (1 min)
 3. **Trigger failure** — `kubectl delete pod -l app=payment-service -n production` (1 min)
-4. **Watch autonomous chain** — Alert → Investigate → Jira → Remediate → Validate → Resolve (5-8 min)
+4. **Watch autonomous workflow** — Alert → Investigate → Jira → Remediate → Validate → Resolve (5-8 min)
 5. **Show safety rails** — Start chaos experiment, watch agent skip remediation (5 min)
 6. **Show escalation** — Simulate unknown pattern, watch agent escalate to human (3 min)
 

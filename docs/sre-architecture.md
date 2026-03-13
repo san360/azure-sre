@@ -172,9 +172,9 @@ The SRE Agent's memory is seeded with operational runbooks via `SearchMemory`:
 
 ---
 
-## 4. Subagent Hierarchy & Handoff Chain
+## 4. Subagent Routing & Workflow Boundaries
 
-Four specialized subagents handle distinct phases of the incident lifecycle. The IncidentHandler is the entry point; it delegates to downstream agents based on investigation findings.
+Four specialized subagents support distinct operational workflows. The IncidentHandler is the primary incident entry point, while follow-up analysis and health checks are activated through separate response plans, scheduled tasks, or manual invocation.
 
 ```mermaid
 graph TD
@@ -190,8 +190,8 @@ graph TD
         IH --> IH2 --> IH3 --> IH4 --> IH5
     end
 
-    IH5 -->|"Known pattern<br/>+ pre-approved fix"| AR
-    IH5 -->|"Chaos experiment<br/>detected"| RV
+    IH5 -->|"Known pattern<br/>+ pre-approved fix"| FIX["Execute approved fix in-thread<br/>or propose exact remediation"]
+    IH5 -->|"Chaos experiment<br/>detected"| FOLLOWUP["Recommend separate<br/>resilience validation workflow"]
     IH5 -->|"Unknown / complex"| HUMAN["Human Escalation<br/>(Jira + Teams)"]
 
     subgraph AR_BOX["ContosoMealsAutoRemediator"]
@@ -201,8 +201,9 @@ graph TD
         AR --> AR2 --> AR3
     end
 
-    AR3 -->|"success"| RV
+    FIX -->|"Known remediation requires dedicated run"| AR
     AR3 -->|"failed after 2 retries"| HUMAN
+    AR3 -->|"success"| FOLLOWUP
 
     subgraph RV_BOX["ContosoMealsResilienceValidator"]
         RV["Compare metrics<br/>(during vs baseline)"]
@@ -210,6 +211,8 @@ graph TD
         RV3["Recommend improvements<br/>(PDBs, circuit breakers, retries)"]
         RV --> RV2 --> RV3
     end
+
+    FOLLOWUP --> RV
 
     RV3 -->|"availability < 99%"| GHISSUE["GitHub Issue<br/>(improvement recommendations)"]
     RV3 -->|"update Jira"| CLOSE["Jira → Closed"]
@@ -255,11 +258,11 @@ graph TD
 
 ## 5. Auto-Remediation Playbooks
 
-The AutoRemediator executes only pre-approved actions with strict safety ceilings.
+The AutoRemediator executes only pre-approved actions with strict safety ceilings. In the GA operating model, use it through a dedicated response plan, scheduled task, or manual invocation after the incident is triaged rather than as an automatic downstream handoff target.
 
 ```mermaid
 graph TD
-    TRIGGER["Handoff from IncidentHandler<br/>(with Jira key)"] --> PRECHECK
+    TRIGGER["Dedicated remediation response plan,<br/>scheduled task, or manual invocation<br/>(with Jira key)"] --> PRECHECK
 
     PRECHECK{"Pre-checks pass?<br/>• No active chaos<br/>• No rollout in progress<br/>• Known failure pattern"}
 
@@ -280,7 +283,7 @@ graph TD
     MATCH -->|"Node pool at zero"| S6["S6: Scale Node Pool<br/>az aks nodepool scale --node-count 1<br/>Validate: 180s, node Ready, pods Running<br/>Max 1 attempt"]
 
     S1 & S2 & S3 & S4 & S5 & S6 --> VALIDATE{"Validation Passed?"}
-    VALIDATE -->|"Yes"| JIRA_OK["Update Jira → Resolved<br/>Hand off to ResilienceValidator"]
+    VALIDATE -->|"Yes"| JIRA_OK["Update Jira → Resolved<br/>Recommend resilience validation if needed"]
     VALIDATE -->|"No"| ESCALATE
 
     style ESCALATE fill:#c0392b,color:#fff
@@ -313,14 +316,13 @@ sequenceDiagram
     participant AI as App Insights
     participant AKS as AKS Cluster
     participant JIRA as Jira SM
-    participant AR as AutoRemediator
     participant RV as ResilienceValidator
     participant GH as GitHub
 
     Note over AM: Alert condition met<br/>(e.g., payment-service 5xx > 30%)
     AM->>AG: Fire alert (ag-contoso-meals-sre)
     AG->>SRE: Notify SRE Agent
-    SRE->>IH: Delegate to IncidentHandler
+    SRE->>IH: Route to IncidentHandler via response plan
 
     rect rgb(70, 130, 180)
         Note over IH: Phase 1 — Intake
@@ -349,20 +351,19 @@ sequenceDiagram
     end
 
     rect rgb(230, 126, 34)
-        Note over AR: Remediation
-        IH->>AR: Handoff (known pattern: CrashLoopBackOff)
-        AR->>AR: Pre-check: no chaos, no rollout
-        AR->>AKS: kubectl rollout restart deployment/payment-service
-        Note over AR: Wait 60s
-        AR->>AI: Validate error rate
-        AI-->>AR: Error rate = 2% ✅
-        AR->>JIRA: Add remediation log comment
-        AR->>JIRA: Transition → Resolved
+        Note over IH: Remediation in-thread
+        IH->>IH: Known pattern: CrashLoopBackOff
+        IH->>AKS: kubectl rollout restart deployment/payment-service
+        Note over IH: Wait 60s
+        IH->>AI: Validate error rate
+        AI-->>IH: Error rate = 2% ✅
+        IH->>JIRA: Add remediation log comment
+        IH->>JIRA: Transition → Resolved
     end
 
     rect rgb(39, 174, 96)
         Note over RV: Resilience Validation
-        AR->>RV: Handoff
+        Note over RV: Started by separate response plan, task, or manual invocation
         RV->>AI: Compare during vs baseline metrics
         AI-->>RV: Availability dropped to 97.2%
         RV->>GH: Create issue (add PDB, circuit breaker)

@@ -582,6 +582,18 @@ module sreAgent './modules/sre-agent.bicep' = if (enableSreAgent) {
   ]
 }
 
+// Subscription-scoped Monitoring Contributor role for Azure Monitor Alerts processing
+// The SRE Agent needs this role at subscription scope to read, modify, and act on alert rules.
+// Role definition: Monitoring Contributor (749f88d5-cbae-40b8-bcfc-e573ddc772fa)
+resource sreAgentMonitoringContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableSreAgent && sreAgentAccessLevel == 'High') {
+  name: guid(subscription().id, 'id-${prefix}-sre-agent', '749f88d5-cbae-40b8-bcfc-e573ddc772fa')
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '749f88d5-cbae-40b8-bcfc-e573ddc772fa')
+    principalId: sreAgentIdentity.outputs.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 // Target resource group role assignments (cross-RG monitoring)
 // Grants the SRE Agent identity access to additional resource groups
 module targetRoleAssignments 'modules/sre-agent-role-target.bicep' = [for (targetRG, index) in targetResourceGroups: if (enableSreAgent) {

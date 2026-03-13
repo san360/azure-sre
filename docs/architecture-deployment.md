@@ -63,7 +63,7 @@ graph TD
 
 ### SRE Agent Configuration
 
-The Azure SRE Agent (`Microsoft.App/agents@2025-05-01-preview`) is the autonomous operations layer. It connects to Azure resources via MCP (Model Context Protocol) servers, uses a knowledge base for runbooks, and orchestrates work through a subagent handoff chain.
+The Azure SRE Agent (`Microsoft.App/agents@2025-05-01-preview`) is the autonomous operations layer. It connects to Azure resources via MCP (Model Context Protocol) servers, uses a knowledge base for runbooks, and routes incidents to the appropriate subagent through incident response plans and scheduled tasks.
 
 #### Tool Connectors
 
@@ -108,46 +108,46 @@ graph LR
 | Outlook | Built-in | Microsoft Graph | Agent system identity | Send email notifications |
 | Knowledge Base | Built-in | Agent memory store | Agent system identity | Semantic search over runbooks |
 
-#### Subagent Handoff Architecture
+#### Response-Plan Routing Architecture
 
-The SRE Agent delegates work to specialized subagents via a handoff chain. Each subagent has a scoped set of tools and a focused system prompt.
+The SRE Agent uses incident response plans and scheduled follow-up tasks to route work to specialized subagents. Each subagent owns a bounded workflow and completes its work within a single thread instead of relying on downstream handoffs.
 
 ```mermaid
 graph TD
     ALERT["Azure Monitor Alert<br/>(Action Group: ag-contoso-meals-sre)"] -->|triggers| SRE["Azure SRE Agent"]
-    SRE -->|delegates to| IH["ContosoMealsIncidentHandler"]
+    SRE -->|response plan routes to| IH["ContosoMealsIncidentHandler"]
 
     IH -->|"Phase 1: Intake"| ACK["Acknowledge Alert<br/>(RunAzCliWriteCommands)"]
     IH -->|"Phase 2: Investigate"| INV["Query App Insights + AKS logs<br/>Check dependencies + activity logs"]
     IH -->|"Phase 3: Assess"| ASSESS["Determine severity<br/>(P1 if error rate > 30%)"]
     IH -->|"Phase 4: ITSM"| JIRA["Create Jira P1 ticket<br/>Assign to service owner<br/>Send email notification"]
 
-    IH -->|"Known failure pattern"| AR["ContosoMealsAutoRemediator"]
-    IH -->|"Chaos experiment active"| RV["ContosoMealsResilienceValidator"]
+    IH -->|"Known failure pattern"| FIX["Execute approved fix in-thread<br/>or propose exact remediation"]
+    IH -->|"Chaos experiment active"| FOLLOWUP["Record follow-up recommendation<br/>for resilience validation"]
     IH -->|"Unknown pattern"| HUMAN["Escalate to Human<br/>(Jira comment + Teams)"]
 
-    AR -->|"Execute fix + validate"| ARFIX["Pre-approved Actions:<br/>• Restart AKS deployments<br/>• Scale memory to 512Mi<br/>• Scale menu-api replicas<br/>• Increase Cosmos RU/s to 1000<br/>• Scale node pool (0-3 nodes)<br/>• Terminate idle PG connections"]
-    AR -->|"Fix validated"| RV
-    AR -->|"Fix failed (2 retries)"| HUMAN
+    FIX -->|"Use bounded write actions"| ARFIX["Pre-approved Actions:<br/>• Restart AKS deployments<br/>• Scale memory to 512Mi<br/>• Scale menu-api replicas<br/>• Increase Cosmos RU/s to 1000<br/>• Scale node pool (0-3 nodes)<br/>• Terminate idle PG connections"]
+    FIX -->|"Fix failed or not approved"| HUMAN
 
+    FOLLOWUP -->|"Separate response plan or task"| RV["ContosoMealsResilienceValidator"]
     RV -->|"Analyze resilience"| RVCHECK["Compare error rates vs baseline<br/>Evaluate availability (< 99%?)"]
     RV -->|"Improvements needed"| GHISSUE["Create GitHub Issue<br/>(PDBs, circuit breakers, retries)"]
     RV -->|"Close incident"| CLOSE["Update Jira → Closed"]
 
     style IH fill:#4a90d9,color:#fff
-    style AR fill:#e67e22,color:#fff
+    style FIX fill:#e67e22,color:#fff
     style RV fill:#27ae60,color:#fff
     style HUMAN fill:#c0392b,color:#fff
 ```
 
 #### Subagent Details
 
-| Subagent | Role | Azure Tools | Jira Tools | Handoffs To | Mode |
-|----------|------|-------------|------------|-------------|------|
-| **ContosoMealsIncidentHandler** | Diagnose incidents, create ITSM tickets | `RunAzCliReadCommands`, `RunAzCliWriteCommands`, `QueryAppInsightsByResourceId`, `QueryLogAnalyticsByResourceId`, `SearchMemory` | `jira_create_issue`, `jira_update_issue`, `jira_transition_issue`, `jira_add_comment` | AutoRemediator, ResilienceValidator | Autonomous |
-| **ContosoMealsAutoRemediator** | Execute pre-approved fixes | `RunAzCliReadCommands`, `RunAzCliWriteCommands`, `GetResourceHealthInfo`, `CreateScheduledMonitoringTask` | `jira_add_comment`, `jira_transition_issue` + 30 more | ResilienceValidator | Autonomous |
-| **ContosoMealsResilienceValidator** | Post-incident resilience analysis | `RunAzCliReadCommands`, `QueryAppInsightsByResourceId`, `QueryLogAnalyticsByResourceId`, `CreateGithubIssue` | `jira_add_comment`, `jira_transition_issue` | — (terminal) | Autonomous |
-| **ContosoMealsHealthCheck** | Scheduled 24h anomaly detection | `RunAzCliReadCommands`, `GetMultipleTimeSeries`, `GetTimeSeriesAnalysis`, `QueryAppInsightsByResourceId` | — | — (standalone) | Autonomous |
+| Subagent | Primary Use | Azure Tools | Jira Tools | Activation Model | Mode |
+|----------|-------------|-------------|------------|------------------|------|
+| **ContosoMealsIncidentHandler** | Diagnose incidents, create ITSM tickets, and either propose or execute approved fixes in-thread | `RunAzCliReadCommands`, `RunAzCliWriteCommands`, `QueryAppInsightsByResourceId`, `QueryLogAnalyticsByResourceId`, `SearchMemory` | `jira_create_issue`, `jira_update_issue`, `jira_transition_issue`, `jira_add_comment` | Incident response plan | Autonomous |
+| **ContosoMealsAutoRemediator** | Execute pre-approved fixes for known patterns after triage is complete | `RunAzCliReadCommands`, `RunAzCliWriteCommands`, `GetResourceHealthInfo`, `CreateScheduledMonitoringTask` | `jira_add_comment`, `jira_transition_issue` + 30 more | Dedicated response plan, scheduled task, or manual invocation | Autonomous |
+| **ContosoMealsResilienceValidator** | Post-incident resilience analysis and follow-up improvements | `RunAzCliReadCommands`, `QueryAppInsightsByResourceId`, `QueryLogAnalyticsByResourceId`, `CreateGithubIssue` | `jira_add_comment`, `jira_transition_issue` | Separate response plan, scheduled task, or manual invocation | Autonomous |
+| **ContosoMealsHealthCheck** | Scheduled 24h anomaly detection | `RunAzCliReadCommands`, `GetMultipleTimeSeries`, `GetTimeSeriesAnalysis`, `QueryAppInsightsByResourceId` | — | Scheduled task | Autonomous |
 
 #### Incident Lifecycle Flow
 
@@ -157,12 +157,11 @@ sequenceDiagram
     participant SRE as SRE Agent
     participant IH as IncidentHandler
     participant JIRA as Jira SM
-    participant AR as AutoRemediator
     participant RV as ResilienceValidator
     participant GH as GitHub
 
     AM->>SRE: Alert fires (Action Group)
-    SRE->>IH: Delegate incident
+    SRE->>IH: Route incident via response plan
     IH->>AM: Acknowledge alert (PATCH)
     IH->>IH: Investigate (App Insights, AKS logs, activity logs)
     IH->>JIRA: Create P1 issue (CONTOSO-XX)
@@ -170,17 +169,14 @@ sequenceDiagram
     IH->>JIRA: Transition → In Progress
 
     alt Known failure pattern
-        IH->>AR: Handoff with Jira key
-        AR->>AR: Pre-check (no chaos, no rollout)
-        AR->>AR: Execute fix (restart / scale / RU bump)
-        AR->>AR: Validate (error rate < 5%)
-        AR->>JIRA: Add remediation log comment
-        AR->>JIRA: Transition → Resolved
-        AR->>RV: Handoff for resilience analysis
+        IH->>IH: Execute approved remediation or propose exact action
+        IH->>JIRA: Add remediation log comment
+        IH->>JIRA: Transition → Resolved
     else Chaos experiment active
-        IH->>RV: Handoff directly
+        IH->>JIRA: Add comment recommending resilience follow-up
     end
 
+    Note over SRE,RV: A separate response plan, scheduled task, or manual invocation starts resilience validation when needed
     RV->>RV: Compare metrics (during vs before)
     RV->>JIRA: Add resilience analysis comment
     alt Availability < 99%

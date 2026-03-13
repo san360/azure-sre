@@ -135,7 +135,7 @@ These principles explain why the agent achieves reliable results in real-world p
 │  │  Knowledge   │  │  (AZ CLI,    │  │                       │  │
 │  │              │  │   REST API)  │  │  - Custom instructions│  │
 │  └──────┬───────┘  └──────┬───────┘  │  - Tool assignments   │  │
-│         │                 │          │  - Handoff rules       │  │
+│         │                 │          │  - Response plan links │  │
 │         │                 │          │  - Knowledge base      │  │
 │         └────────┬────────┘          └───────────┬───────────┘  │
 │                  │                               │              │
@@ -259,10 +259,10 @@ The **no-code Subagent Builder** lets you create purpose-built agents for specif
 |----------|---------|
 | **Name** | Descriptive name for identification |
 | **Instructions** | Custom behavioral instructions (natural language) |
-| **Handoff Description** | When to transfer processing to this subagent |
+| **Subagent Description** | Summary shown when selecting this subagent for a response plan or focused workflow |
 | **Custom Tools** | Azure CLI commands, Kusto queries, REST API calls |
 | **Built-in Tools** | System tools to provide access to |
-| **Handoff Agents** | Which subagent takes over after this one completes |
+| **Activation** | Which response plan, scheduled task, or manual workflow should invoke this subagent |
 | **Knowledge Base** | Uploaded markdown/text files as reference material (up to 16MB/file) |
 
 ### Testing
