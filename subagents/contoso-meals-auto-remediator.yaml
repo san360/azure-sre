@@ -96,38 +96,38 @@ spec:
     - CreateScheduledMonitoringTask
     - GetAzCliHelp
   mcp_tools:
-    - Jira-Service-Management_jira_add_comment
-    - Jira-Service-Management_jira_add_worklog
-    - Jira-Service-Management_jira_batch_create_issues
-    - Jira-Service-Management_jira_batch_create_versions
-    - Jira-Service-Management_jira_batch_get_changelogs
-    - Jira-Service-Management_jira_create_issue
-    - Jira-Service-Management_jira_create_issue_link
-    - Jira-Service-Management_jira_create_remote_issue_link
-    - Jira-Service-Management_jira_create_sprint
-    - Jira-Service-Management_jira_create_version
-    - Jira-Service-Management_jira_delete_issue
-    - Jira-Service-Management_jira_download_attachments
-    - Jira-Service-Management_jira_edit_comment
-    - Jira-Service-Management_jira_get_agile_boards
-    - Jira-Service-Management_jira_get_all_projects
-    - Jira-Service-Management_jira_get_board_issues
-    - Jira-Service-Management_jira_get_issue
-    - Jira-Service-Management_jira_get_link_types
-    - Jira-Service-Management_jira_get_project_issues
-    - Jira-Service-Management_jira_get_project_versions
-    - Jira-Service-Management_jira_get_sprint_issues
-    - Jira-Service-Management_jira_get_sprints_from_board
-    - Jira-Service-Management_jira_get_transitions
-    - Jira-Service-Management_jira_get_user_profile
-    - Jira-Service-Management_jira_get_worklog
-    - Jira-Service-Management_jira_link_to_epic
-    - Jira-Service-Management_jira_remove_issue_link
-    - Jira-Service-Management_jira_search
-    - Jira-Service-Management_jira_search_fields
-    - Jira-Service-Management_jira_transition_issue
-    - Jira-Service-Management_jira_update_issue
-    - Jira-Service-Management_jira_update_sprint
+    - mcp-jira-sm_jira_add_comment
+    - mcp-jira-sm_jira_add_worklog
+    - mcp-jira-sm_jira_batch_create_issues
+    - mcp-jira-sm_jira_batch_create_versions
+    - mcp-jira-sm_jira_batch_get_changelogs
+    - mcp-jira-sm_jira_create_issue
+    - mcp-jira-sm_jira_create_issue_link
+    - mcp-jira-sm_jira_create_remote_issue_link
+    - mcp-jira-sm_jira_create_sprint
+    - mcp-jira-sm_jira_create_version
+    - mcp-jira-sm_jira_delete_issue
+    - mcp-jira-sm_jira_download_attachments
+    - mcp-jira-sm_jira_edit_comment
+    - mcp-jira-sm_jira_get_agile_boards
+    - mcp-jira-sm_jira_get_all_projects
+    - mcp-jira-sm_jira_get_board_issues
+    - mcp-jira-sm_jira_get_issue
+    - mcp-jira-sm_jira_get_link_types
+    - mcp-jira-sm_jira_get_project_issues
+    - mcp-jira-sm_jira_get_project_versions
+    - mcp-jira-sm_jira_get_sprint_issues
+    - mcp-jira-sm_jira_get_sprints_from_board
+    - mcp-jira-sm_jira_get_transitions
+    - mcp-jira-sm_jira_get_user_profile
+    - mcp-jira-sm_jira_get_worklog
+    - mcp-jira-sm_jira_link_to_epic
+    - mcp-jira-sm_jira_remove_issue_link
+    - mcp-jira-sm_jira_search
+    - mcp-jira-sm_jira_search_fields
+    - mcp-jira-sm_jira_transition_issue
+    - mcp-jira-sm_jira_update_issue
+    - mcp-jira-sm_jira_update_sprint
   handoff_description: >-
     Use this subagent for known, pre-approved remediation patterns after an incident has already
     been triaged. It executes bounded write actions (pod restarts, memory scaling, Container App

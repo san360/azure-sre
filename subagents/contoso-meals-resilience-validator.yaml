@@ -31,11 +31,11 @@ spec:
     - FindConnectedGitHubRepo
     - SearchMemory
   mcp_tools:
-    - Jira-Service-Management_jira_add_comment
-    - Jira-Service-Management_jira_get_issue
-    - Jira-Service-Management_jira_update_issue
-    - Jira-Service-Management_jira_transition_issue
-    - Jira-Service-Management_jira_get_transitions
+    - mcp-jira-sm_jira_add_comment
+    - mcp-jira-sm_jira_get_issue
+    - mcp-jira-sm_jira_update_issue
+    - mcp-jira-sm_jira_transition_issue
+    - mcp-jira-sm_jira_get_transitions
   handoff_description: >-
     Use this subagent for post-incident resilience analysis, especially after chaos experiments or
     completed remediations. It evaluates service availability, recommends improvements, creates

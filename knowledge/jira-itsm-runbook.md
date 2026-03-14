@@ -6,9 +6,15 @@
 - **Jira Instance:** `jira-sm` Container App in `rg-contoso-meals`
 - **MCP Bridge:** `mcp-atlassian` Container App, port 9000, endpoint `/mcp`
 - **Project Name:** Contoso Meals Operations
-- **Project Key:** CONTOSO
+- **Project Key:** `CONTOSO`
+- **Source of truth:** `scripts/setup-jira.sh` checks for and creates the Jira project with key `CONTOSO` via `POST /rest/api/2/project`
 - **Issue Type for Incidents:** Task
 - **Available Fields:** Summary (required), Description, Priority, Attachment
+
+### Provisioning Notes
+- Run `./scripts/setup-jira.sh` after Jira finishes first-boot setup.
+- The script verifies project availability with `GET /rest/api/2/project/CONTOSO` and creates it if missing.
+- If the project key ever changes in Jira provisioning, update this runbook and all SRE Agent prompts that reference `CONTOSO`.
 
 ### Incident Creation Guidelines
 When creating a Jira incident ticket via the SRE Agent:
